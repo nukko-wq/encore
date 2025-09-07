@@ -241,9 +241,23 @@ CREATE INDEX idx_bookmark_tags_tag_id ON bookmark_tags(tag_id);
 CREATE INDEX idx_bookmark_metadata_bookmark_id ON bookmark_metadata(bookmark_id);
 CREATE INDEX idx_bookmark_metadata_type ON bookmark_metadata(metadata_type);
 
--- 全文検索用インデックス
-CREATE INDEX idx_bookmarks_search ON bookmarks USING gin(
+-- 日本語対応全文検索用インデックス（Trigram）
+-- 日本語の検索体験向上のためTrigramベースのインデックスを採用
+create extension if not exists pg_trgm;
+
+-- 各フィールド別のTrigramインデックス
+create index idx_bookmarks_title_trgm on bookmarks using gin (title gin_trgm_ops);
+create index idx_bookmarks_desc_trgm on bookmarks using gin (description gin_trgm_ops);
+create index idx_bookmarks_memo_trgm on bookmarks using gin (memo gin_trgm_ops);
+
+-- 従来のenglish辞書ベースインデックス（英語コンテンツ用として残す）
+CREATE INDEX idx_bookmarks_search_en ON bookmarks USING gin(
   to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(memo, ''))
+);
+
+-- 日本語＋英語対応のsimple辞書ベースインデックス（Trigramで不足な場合の補完用）
+CREATE INDEX idx_bookmarks_search_simple ON bookmarks USING gin(
+  to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(description, '') || ' ' || coalesce(memo, ''))
 );
 ```
 
@@ -276,7 +290,13 @@ CREATE INDEX idx_bookmarks_search ON bookmarks USING gin(
 #### 検索・フィルタ
 ```typescript
 // GET /api/search?q=keyword&tags=tag1,tag2&filter=favorites
+// 日本語検索に対応したTrigramベース検索を実装
+
 // GET /api/bookmarks/feed?page=1&limit=20&sort=created_at&order=desc
+// 検索クエリ例：
+// SELECT * FROM bookmarks 
+// WHERE (title % 'search_term' OR description % 'search_term' OR memo % 'search_term')
+// ORDER BY similarity(title || ' ' || description || ' ' || memo, 'search_term') DESC;
 ```
 
 #### メタデータ取得API（三段構え）
@@ -409,6 +429,66 @@ export class BookmarkService {
     
     if (error) {
       throw new Error(`Failed to fetch bookmarks: ${error.message}`)
+    }
+    
+    return data || []
+  }
+  
+  // 日本語対応全文検索（Trigramベース）
+  async searchBookmarks(searchTerm: string, filters?: BookmarkFilters): Promise<BookmarkRow[]> {
+    if (!searchTerm.trim()) {
+      return this.getBookmarks(filters)
+    }
+    
+    // Trigramを使用した日本語検索
+    let query = supabase
+      .rpc('search_bookmarks_trigram', {
+        search_term: searchTerm.trim(),
+        min_similarity: 0.1 // 類似度闾値
+      })
+    
+    // フィルタ適用
+    if (filters?.status) {
+      query = query.eq('status', filters.status)
+    }
+    
+    if (filters?.is_favorite) {
+      query = query.eq('is_favorite', filters.is_favorite)
+    }
+    
+    const { data, error } = await query
+    
+    if (error) {
+      // Trigram検索失敗時はフォールバックでILIKE検索
+      console.warn('Trigram search failed, falling back to ILIKE:', error)
+      return this.searchBookmarksFallback(searchTerm, filters)
+    }
+    
+    return data || []
+  }
+  
+  // フォールバック検索（ILIKE使用）
+  private async searchBookmarksFallback(searchTerm: string, filters?: BookmarkFilters): Promise<BookmarkRow[]> {
+    const searchPattern = `%${searchTerm}%`
+    
+    let query = supabase
+      .from('bookmarks')
+      .select('*')
+      .or(`title.ilike.${searchPattern},description.ilike.${searchPattern},memo.ilike.${searchPattern}`)
+      .order('created_at', { ascending: false })
+    
+    if (filters?.status) {
+      query = query.eq('status', filters.status)
+    }
+    
+    if (filters?.is_favorite) {
+      query = query.eq('is_favorite', filters.is_favorite)
+    }
+    
+    const { data, error } = await query
+    
+    if (error) {
+      throw new Error(`Failed to search bookmarks: ${error.message}`)
     }
     
     return data || []
@@ -1360,6 +1440,9 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret
 USE_EXTERNAL_PREVIEW=0  # 1で外部API有効
 MICROLINK_API_KEY=your_microlink_key  # オプション
 
+# 日本語検索設定
+SEARCH_MIN_SIMILARITY=0.1  # Trigram検索の類似度闾値
+
 # Cronセキュリティ
 CRON_SECRET=your_random_cron_secret
 
@@ -1420,8 +1503,56 @@ export function makeAbsoluteUrl(href: string, baseUrl: string): string {
 13. レートリミット実装
 14. メトリクスとモニタリング
 
+### 日本語検索用ストアドファンクション
+```sql
+-- Trigramを使用した日本語対応検索関数
+create or replace function search_bookmarks_trigram(
+  search_term text,
+  min_similarity float default 0.1
+)
+returns table (
+  id uuid,
+  user_id uuid,
+  url text,
+  title text,
+  description text,
+  thumbnail_url text,
+  memo text,
+  is_favorite boolean,
+  is_pinned boolean,
+  status text,
+  pinned_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz,
+  similarity_score float
+)
+language sql
+as $$
+  select 
+    b.*,
+    greatest(
+      similarity(coalesce(b.title, ''), search_term),
+      similarity(coalesce(b.description, ''), search_term),
+      similarity(coalesce(b.memo, ''), search_term)
+    ) as similarity_score
+  from bookmarks b
+  where (
+    b.title % search_term or 
+    b.description % search_term or 
+    b.memo % search_term
+  )
+  and greatest(
+    similarity(coalesce(b.title, ''), search_term),
+    similarity(coalesce(b.description, ''), search_term),
+    similarity(coalesce(b.memo, ''), search_term)
+  ) >= min_similarity
+  order by similarity_score desc, b.created_at desc;
+$$;
+```
+
 ### デバッグ情報保存
 - `source`フィールドでどの段階で抽出できたか記録
 - `status`で成功/部分成功/失敗を区別
 - `retry_count`で再試行回数を記録
 - `error_message`で失敗理由を保存
+- `similarity_score`で検索結果の関連度を記録
