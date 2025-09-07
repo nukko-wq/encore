@@ -9,36 +9,9 @@
 3. ✅ **単一責任原則違反** → キャッシュ機構とロジック統合完了
 4. ✅ **エラーハンドリングの不備** → 本番環境対応済み
 5. ✅ **型安全性の不備** → AuthChangeEvent等の型定義完了
+6. ✅ **データベーススキーマの不備** → ENUM型移行完了
 
 ## 🚨 未修正の重要課題
-
-### 6. **データベーススキーマの不備** 🔴 HIGH PRIORITY
-
-**現在の問題:**
-```sql
--- bookmarksテーブル (002_create_bookmarks.sql)
-status text check (status in ('unread','read')) default 'unread',
-```
-
-**問題点:**
-- ENUMではなくTEXT + CHECKで制約定義
-- 将来的な状態拡張時に柔軟性が低い
-- パフォーマンスがENUM型より劣る
-
-**修正が必要な理由:**
-- データ整合性の向上
-- 将来の機能拡張への対応
-- データベースパフォーマンスの改善
-
-**推奨修正:**
-```sql
--- ENUM型を定義
-CREATE TYPE bookmark_status AS ENUM ('unread', 'read', 'archived', 'deleted');
-ALTER TABLE bookmarks ADD COLUMN new_status bookmark_status default 'unread';
-UPDATE bookmarks SET new_status = status::bookmark_status;
-ALTER TABLE bookmarks DROP COLUMN status;
-ALTER TABLE bookmarks RENAME COLUMN new_status TO status;
-```
 
 ### 7. **パフォーマンス最適化不足** 🟡 MEDIUM PRIORITY
 

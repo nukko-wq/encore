@@ -1,0 +1,41 @@
+-- ブックマークステータスのENUM型改善
+-- TEXT + CHECKからENUMへの移行でパフォーマンスとデータ整合性を向上
+
+-- ENUM型を定義（将来の拡張を考慮）
+CREATE TYPE bookmark_status AS ENUM (
+  'unread',     -- 未読
+  'read',       -- 既読
+  'archived',   -- アーカイブ
+  'deleted'     -- 論理削除
+);
+
+-- 新しいENUM型のカラムを追加
+ALTER TABLE public.bookmarks ADD COLUMN new_status bookmark_status DEFAULT 'unread';
+
+-- 既存データを新しいENUM型に移行
+UPDATE public.bookmarks 
+SET new_status = CASE 
+  WHEN status = 'unread' THEN 'unread'::bookmark_status
+  WHEN status = 'read' THEN 'read'::bookmark_status
+  ELSE 'unread'::bookmark_status  -- デフォルトフォールバック
+END;
+
+-- 古いstatusカラムを削除
+ALTER TABLE public.bookmarks DROP COLUMN status;
+
+-- 新しいカラムをstatusにリネーム
+ALTER TABLE public.bookmarks RENAME COLUMN new_status TO status;
+
+-- NOT NULL制約を追加（データ整合性強化）
+ALTER TABLE public.bookmarks ALTER COLUMN status SET NOT NULL;
+
+-- インデックスを再作成（パフォーマンス向上）
+CREATE INDEX idx_bookmarks_user_status_created_enum ON bookmarks(user_id, status, created_at DESC);
+
+-- 検索用の複合インデックス追加
+CREATE INDEX idx_bookmarks_status_favorite ON bookmarks(status, is_favorite) WHERE status != 'deleted';
+CREATE INDEX idx_bookmarks_status_pinned ON bookmarks(status, is_pinned) WHERE status != 'deleted' AND is_pinned = true;
+
+-- コメント追加（ドキュメント化）
+COMMENT ON TYPE bookmark_status IS 'ブックマークの状態を表すENUM型';
+COMMENT ON COLUMN bookmarks.status IS 'ブックマークの読み取り状態（ENUM型でパフォーマンス最適化）';

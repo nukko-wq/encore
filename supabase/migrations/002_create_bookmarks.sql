@@ -1,3 +1,11 @@
+-- ENUM型を先に定義（将来の拡張性を考慮）
+CREATE TYPE bookmark_status AS ENUM (
+  'unread',     -- 未読
+  'read',       -- 既読
+  'archived',   -- アーカイブ
+  'deleted'     -- 論理削除
+);
+
 -- ブックマークテーブル作成
 create table if not exists public.bookmarks (
   id uuid primary key default gen_random_uuid(),
@@ -10,7 +18,7 @@ create table if not exists public.bookmarks (
   memo text,
   is_favorite boolean default false,
   is_pinned boolean default false,
-  status text check (status in ('unread','read')) default 'unread',
+  status bookmark_status not null default 'unread',
   pinned_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
@@ -51,11 +59,16 @@ for delete using (
               where ae.email = auth.email())
 );
 
--- パフォーマンス最適化用インデックス
+-- パフォーマンス最適化用インデックス（ENUM型対応）
 create index if not exists idx_bookmarks_user_created_at on bookmarks(user_id, created_at desc);
+create index if not exists idx_bookmarks_user_status_created on bookmarks(user_id, status, created_at desc);
 create index if not exists idx_bookmarks_user_favorite on bookmarks(user_id, is_favorite);
 create index if not exists idx_bookmarks_user_pinned on bookmarks(user_id, is_pinned);
 create index if not exists idx_bookmarks_url on bookmarks(url);
+
+-- ステータス別最適化インデックス（論理削除対応）
+create index if not exists idx_bookmarks_status_favorite on bookmarks(status, is_favorite) where status != 'deleted';
+create index if not exists idx_bookmarks_status_pinned on bookmarks(status, is_pinned) where status != 'deleted' and is_pinned = true;
 
 -- URL重複防止用ユニークインデックス
 create unique index if not exists uniq_bookmarks_user_canonical 

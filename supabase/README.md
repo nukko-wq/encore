@@ -20,9 +20,18 @@ supabase/
 
 以下のSQLを順番にSupabaseのSQL Editorで実行してください：
 
+#### 新規セットアップの場合
 1. **migrations/001_create_allowed_emails.sql** - ホワイトリストテーブル作成
-2. **migrations/002_create_bookmarks.sql** - ブックマークテーブル作成
+2. **migrations/002_create_bookmarks.sql** - ブックマークテーブル作成（ENUM型対応済み）
 3. **seed/001_initial_allowed_emails.sql** - 初期データ投入
+
+#### 既存データベースの場合（TEXT→ENUM移行）
+1. **migrations/001_create_allowed_emails.sql** - ホワイトリストテーブル作成
+2. **旧版のmigrations/002_create_bookmarks.sql** - 古いブックマークテーブル作成
+3. **migrations/003_improve_bookmark_status_enum.sql** - ENUM型への移行
+4. **seed/001_initial_allowed_emails.sql** - 初期データ投入
+
+⚠️ **重要**: 既存のブックマークデータがある場合は、必ず003のマイグレーションを実行してENUM型に移行してください。データ損失を防ぐため、事前にバックアップを取ることを推奨します。
 
 ### 2. ホワイトリスト設定
 
@@ -66,10 +75,19 @@ NEXT_PUBLIC_SITE_URL=http://localhost:3000  # 開発環境
 - **memo** (text): ユーザーメモ
 - **is_favorite** (boolean): お気に入りフラグ
 - **is_pinned** (boolean): ピン留めフラグ
-- **status** (text): 読み取り状態（'unread'/'read'）
+- **status** (bookmark_status ENUM, NOT NULL): 読み取り状態
+  - `'unread'`: 未読
+  - `'read'`: 既読
+  - `'archived'`: アーカイブ
+  - `'deleted'`: 論理削除
 - **pinned_at** (timestamptz): ピン留め日時
 - **created_at** (timestamptz): 作成日時
 - **updated_at** (timestamptz): 更新日時
+
+#### パフォーマンス最適化
+- ENUM型の使用によりストレージサイズを削減
+- ステータス別インデックスで高速検索
+- 論理削除対応の部分インデックス
 
 ## Row Level Security (RLS) ポリシー
 
