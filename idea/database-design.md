@@ -167,7 +167,7 @@ create table if not exists public.bookmark_tags (
 
 alter table public.bookmark_tags enable row level security;
 
--- ブックマーク所有者かつホワイトリストユーザーのみタグ操作可能
+-- ブックマーク所有者かつタグ所有者かつホワイトリストユーザーのみタグ操作可能
 create policy "manage_bookmark_tags_if_allowed" on public.bookmark_tags
 for all using (
   exists (
@@ -176,6 +176,11 @@ for all using (
     and b.user_id = auth.uid()
     and exists (select 1 from public.allowed_emails ae
                 where ae.email = (auth.jwt()->>'email'))
+  )
+  and exists (
+    select 1 from public.tags t 
+    where t.id = bookmark_tags.tag_id 
+    and t.user_id = auth.uid()
   )
 );
 ```
