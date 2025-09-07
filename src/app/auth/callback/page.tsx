@@ -14,20 +14,20 @@ export default function AuthCallback() {
 
         if (error) {
           console.error('Authentication error:', error)
-          router.push('/?error=auth_failed')
+          router.push('/login?error=auth_failed')
           return
         }
 
         if (data.session) {
-          // 認証成功 - ホームページにリダイレクト
-          router.push('/')
+          // 認証成功 - ダッシュボードにリダイレクト
+          router.push('/dashboard')
         } else {
           // セッションなし - ログインページにリダイレクト
-          router.push('/?error=no_session')
+          router.push('/login?error=no_session')
         }
       } catch (err) {
         console.error('Callback handling error:', err)
-        router.push('/?error=callback_failed')
+        router.push('/login?error=callback_failed')
       }
     }
 
