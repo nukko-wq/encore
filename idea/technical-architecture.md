@@ -314,7 +314,7 @@ CREATE INDEX idx_bookmarks_search_simple ON bookmarks USING gin(
 // POST /api/extract/external - 外部APIフォールバック
 //   JSレンダリング必須や難サイト用
 //   Microlink/Iframely/OpenGraph.io等
-//   環境変数でON/OFF（USE_EXTERNAL_PREVIEW=1）
+//   環境変数でON/OFF（METADATA_FALLBACK_ENABLED=true）
 
 // POST /api/twitter/enhance - Twitter URL 追加情報（オプション）
 // POST /api/import/pocket - Pocket インポート
@@ -583,7 +583,7 @@ export class BookmarkService {
     }
     
     // Phase 3: 外部APIフォールバック（環境変数で制御）
-    if (this.isIncomplete(metadata) && process.env.USE_EXTERNAL_PREVIEW === '1') {
+    if (this.isIncomplete(metadata) && process.env.METADATA_FALLBACK_ENABLED === 'true') {
       const externalResult = await this.extractWithExternalAPI(normalizedUrl)
       metadata = this.mergeMetadata(metadata, externalResult)
       source = 'external'
@@ -812,7 +812,7 @@ export async function POST(request: Request) {
 
 // app/api/extract/external/route.ts - 外部APIフォールバック
 export async function POST(request: Request) {
-  if (process.env.USE_EXTERNAL_PREVIEW !== '1') {
+  if (process.env.METADATA_FALLBACK_ENABLED !== 'true') {
     return Response.json({ error: 'External API disabled' }, { status: 403 })
   }
   
@@ -868,7 +868,7 @@ export class MetadataService {
           console.warn('Node extraction failed:', nodeError)
           
           // 4. 外部APIフォールバック
-          if (process.env.USE_EXTERNAL_PREVIEW === '1') {
+          if (process.env.METADATA_FALLBACK_ENABLED === 'true') {
             try {
               const externalResult = await this.callExternalExtractor(normalizedUrl)
               metadata = { ...metadata, ...externalResult.data }
@@ -1437,7 +1437,7 @@ GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 
 # メタデータ取得
-USE_EXTERNAL_PREVIEW=0  # 1で外部API有効
+METADATA_FALLBACK_ENABLED=false  # trueで外部API有効
 MICROLINK_API_KEY=your_microlink_key  # オプション
 
 # 日本語検索設定

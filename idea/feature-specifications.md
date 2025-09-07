@@ -34,7 +34,7 @@
   - Microlink API (無料枠あり)
   - LinkPreview API (バックアップ)
 - **フォールバック条件**: タイトルが取得できない場合
-- **環境変数制御**: `FALLBACK_API_ENABLED=true/false`
+- **環境変数制御**: `METADATA_FALLBACK_ENABLED=true/false`
 
 #### Phase 3: 特定サイト専用パーサー
 - **GitHub**: リポジトリ情報、言語、スター数
