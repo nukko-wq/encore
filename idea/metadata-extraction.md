@@ -15,9 +15,12 @@ src/
 │   │   │   └── external/
 │   │   │       └── route.ts      -- 外部APIフォールバック（Node）
 │   │   ├── cron/
-│   │   │   └── revalidate/
-│   │   │       └── route.ts      -- バックグラウンド再取得
+│   │   │   ├── revalidate/
+│   │   │   │   └── route.ts      -- バックグラウンド再取得
+│   │   │   └── external-api-summary/
+│   │   │       └── route.ts      -- 外部API使用状況日次集計
 ├── lib/
+│   ├── url-normalization.ts         -- 統一URL正規化（Edge/Node/Client共通）
 │   └── services/
 │       └── metadata/
 │           ├── preview-extractor.ts  -- メインメタデータ抽出
@@ -33,6 +36,128 @@ src/
 - **Edge**: 認可チェック、軽量リダイレクト、キャッシュ判定など"薄い"処理のみ
 - **Node**: URL取得→HTML取得→OGP/メタ抽出→本文抜粋の実質的処理
 - **HTMLRewriter**: Vercelで使用不可のため、Cheerioで代替
+- **URL正規化**: Edge/Node/Client間で同一実装を使用（差し戻し対策）
+
+### 統一URL正規化モジュール
+```typescript
+// lib/url-normalization.ts - Edge/Node/Client共通正規化ロジック
+// IMPORTANT: この実装をEdge/Node/Clientで必ず共有すること
+
+/**
+ * URL正規化関数（重複防止・差し戻し対策）
+ * Edge/Node/Client間で完全に同一の実装を使用する
+ */
+export function normalizeUrl(url: string): string {
+  try {
+    const urlObj = new URL(url)
+    
+    // 1. ホスト名の小文字化
+    urlObj.hostname = urlObj.hostname.toLowerCase()
+    
+    // 2. デフォルトポート削除
+    if ((urlObj.protocol === 'http:' && urlObj.port === '80') ||
+        (urlObj.protocol === 'https:' && urlObj.port === '443')) {
+      urlObj.port = ''
+    }
+    
+    // 3. フラグメント除去
+    urlObj.hash = ''
+    
+    // 4. トラッキングパラメータ除去（統一リスト）
+    const trackingParams = [
+      // Google Analytics & Ads
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'utm_id', 'utm_source_platform', 'utm_creative_format', 'utm_marketing_tactic',
+      '_ga', '_gl', 'gclid', 'gclsrc', 'dclid', 'wbraid', 'gbraid',
+      
+      // Facebook & Social
+      'fbclid', 'fb_action_ids', 'fb_action_types', 'fb_ref', 'fb_source',
+      
+      // Microsoft
+      'msclkid', 'mc_eid', 'mc_cid',
+      
+      // Other tracking
+      'ref', 'source', 'campaign', 'medium', 'content',
+      '_hsenc', '_hsmi', 'hsCtaTracking', // HubSpot
+      'vero_conv', 'vero_id', // Vero
+      'pk_campaign', 'pk_kwd', 'pk_medium', 'pk_source', // Piwik/Matomo
+      
+      // Email tracking
+      'email_source', 'email_campaign', 'email_id'
+    ]
+    
+    trackingParams.forEach(param => {
+      urlObj.searchParams.delete(param)
+    })
+    
+    // 5. クエリキーのソート（残存パラメータの順序統一）
+    const sortedParams = new URLSearchParams()
+    Array.from(urlObj.searchParams.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([key, value]) => sortedParams.append(key, value))
+    urlObj.search = sortedParams.toString()
+    
+    // 6. 末尾スラッシュ統一（パスがルートでない場合のみ削除）
+    let normalizedUrl = urlObj.toString()
+    if (urlObj.pathname !== '/' && normalizedUrl.endsWith('/')) {
+      normalizedUrl = normalizedUrl.slice(0, -1)
+    }
+    
+    return normalizedUrl
+    
+  } catch (error) {
+    // URL形式エラー時は元のURLを返す
+    console.warn('URL normalization failed:', error)
+    return url
+  }
+}
+
+/**
+ * URL正規化の妥当性検証（開発/テスト用）
+ * 正規化前後でのURL整合性をチェック
+ */
+export function validateNormalization(originalUrl: string, normalizedUrl: string): boolean {
+  try {
+    const original = new URL(originalUrl)
+    const normalized = new URL(normalizedUrl)
+    
+    // 基本要素が保持されていることを確認
+    return (
+      original.protocol === normalized.protocol &&
+      original.hostname.toLowerCase() === normalized.hostname &&
+      original.pathname === normalized.pathname
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 相対URL→絶対URL変換（<base href>対応）
+ */
+export function makeAbsoluteUrl(href: string, baseUrl: string, $?: any): string {
+  try {
+    let effectiveBaseUrl = baseUrl
+    
+    // CheerioオブジェクトがあればHTML内の<base href>をチェック
+    if ($ && typeof $ === 'function') {
+      const baseHref = $('base[href]').attr('href')
+      if (baseHref) {
+        try {
+          // <base href>が見つかった場合、それを基準URLとして使用
+          effectiveBaseUrl = new URL(baseHref, baseUrl).href
+        } catch (error) {
+          console.warn('Invalid base href detected, using original baseUrl:', baseHref, error)
+        }
+      }
+    }
+    
+    return new URL(href, effectiveBaseUrl).href
+  } catch {
+    return ''
+  }
+}
+```
 
 ### APIルート構成
 
@@ -45,6 +170,7 @@ import * as cheerio from 'cheerio'
 import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
 import { validateUrlForFetch, safeFetch } from '@/lib/security/fetch-guard'
+import { normalizeUrl, makeAbsoluteUrl } from '@/lib/url-normalization'
 
 export async function POST(request: Request) {
   const { url } = await request.json()
@@ -59,7 +185,7 @@ export async function POST(request: Request) {
     const html = await safeFetch(url)
     const $ = cheerio.load(html)
     
-    // OGP/メタデータ抽出（優先度順）
+    // OGP/メタデータ抽出（優先度・解像度優先）
     const title = 
       $('meta[property="og:title"]').attr('content') ||
       $('meta[name="twitter:title"]').attr('content') ||
@@ -72,25 +198,20 @@ export async function POST(request: Request) {
       $('meta[name="description"]').attr('content') ||
       ''
     
-    const image = 
-      $('meta[property="og:image"]').attr('content') ||
-      $('meta[name="twitter:image"]').attr('content') ||
-      $('link[rel="apple-touch-icon"]').attr('href') ||
-      ''
+    // 高品質・安全な画像を優先選択
+    const image = selectBestImage($, url)
     
     const siteName = 
       $('meta[property="og:site_name"]').attr('content') ||
       $('meta[name="application-name"]').attr('content') ||
       ''
     
-    const favicon = 
-      $('link[rel="icon"]').attr('href') ||
-      $('link[rel="shortcut icon"]').attr('href') ||
-      '/favicon.ico'
+    // 高解像度アイコンを優先選択
+    const favicon = selectBestIcon($, url)
     
-    // 相対URLを絶対URLに変換
-    const absoluteImage = image ? new URL(image, url).href : ''
-    const absoluteFavicon = favicon ? new URL(favicon, url).href : ''
+    // 相対URLを絶対URLに変換（<base href>考慮）
+    const absoluteImage = image ? makeAbsoluteUrl(image, url, $) : ''
+    const absoluteFavicon = favicon ? makeAbsoluteUrl(favicon, url, $) : ''
     
     // descriptionが無い場合はReadabilityで本文抜粋
     let extractedDescription = description
@@ -101,11 +222,9 @@ export async function POST(request: Request) {
         const article = reader.parse()
         
         if (article?.textContent) {
-          // 日本語対応: 全角160-200文字程度に制限
-          extractedDescription = article.textContent
-            .replace(/\s+/g, ' ')
-            .trim()
-            .substring(0, 200) + (article.textContent.length > 200 ? '...' : '')
+          // 日本語対応: Unicode安全なトリミング（全角160-200文字程度）
+          const cleanText = article.textContent.replace(/\s+/g, ' ').trim()
+          extractedDescription = safeTextTrim(cleanText, 200)
         }
       } catch (readabilityError) {
         console.warn('Readability extraction failed:', readabilityError)
@@ -142,6 +261,8 @@ export async function POST(request: Request) {
 // app/api/preview/normalize/route.ts - Edge軽量処理（URL正規化のみ）
 export const runtime = 'edge'
 
+import { normalizeUrl } from '@/lib/url-normalization'
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const url = searchParams.get('url')
@@ -149,7 +270,7 @@ export async function GET(request: Request) {
   if (!url) return Response.json({ error: 'URL required' }, { status: 400 })
   
   try {
-    // URL正規化のみ（軽量処理）
+    // 統一モジュールによるURL正規化（Edge/Node/Client共通）
     const normalizedUrl = normalizeUrl(url)
     
     // 基本的なURL検証
@@ -178,44 +299,6 @@ function validateBasicUrl(url: string): void {
   if (!['http:', 'https:'].includes(urlObj.protocol)) {
     throw new Error(`Unsupported protocol: ${urlObj.protocol}`)
   }
-}
-
-function normalizeUrl(url: string): string {
-  const urlObj = new URL(url)
-  
-  // ホスト名の小文字化
-  urlObj.hostname = urlObj.hostname.toLowerCase()
-  
-  // デフォルトポート削除
-  if ((urlObj.protocol === 'http:' && urlObj.port === '80') ||
-      (urlObj.protocol === 'https:' && urlObj.port === '443')) {
-    urlObj.port = ''
-  }
-  
-  // フラグメント除去
-  urlObj.hash = ''
-  
-  // トラッキングパラメータ除去
-  const trackingParams = [
-    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-    'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid', 'ref', 'source'
-  ]
-  trackingParams.forEach(param => urlObj.searchParams.delete(param))
-  
-  // クエリキーのソート
-  const sortedParams = new URLSearchParams()
-  Array.from(urlObj.searchParams.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .forEach(([key, value]) => sortedParams.append(key, value))
-  urlObj.search = sortedParams.toString()
-  
-  // 末尾スラッシュ統一
-  let normalizedUrl = urlObj.toString()
-  if (urlObj.pathname !== '/' && normalizedUrl.endsWith('/')) {
-    normalizedUrl = normalizedUrl.slice(0, -1)
-  }
-  
-  return normalizedUrl
 }
 ```
 
@@ -285,10 +368,30 @@ function shouldRevalidate(cached: any): boolean {
 }
 ```
 
-#### 外部APIフォールバック（オプション）
+#### 外部APIフォールバック（レート制御・ログ対応）
 ```typescript
 // app/api/preview/external/route.ts - 外部APIフォールバック
 export const runtime = 'nodejs'
+
+import { createClient } from '@supabase/supabase-js'
+import { headers } from 'next/headers'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+// レート制限設定
+const RATE_LIMITS = {
+  user: {
+    requests: 10,       // 認証ユーザー：10回/時間
+    window: 60 * 60 * 1000
+  },
+  ip: {
+    requests: 5,        // 未認証：5回/時間
+    window: 60 * 60 * 1000
+  }
+}
 
 export async function POST(request: Request) {
   if (process.env.METADATA_EXTERNAL_ENABLED !== 'true') {
@@ -296,36 +399,47 @@ export async function POST(request: Request) {
   }
   
   const { url } = await request.json()
+  const clientIP = getClientIP(request)
+  const startTime = Date.now()
   
   try {
-    // Microlink APIを使用（例）
-    const microlinkResponse = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`, {
-      headers: {
-        'X-API-Key': process.env.MICROLINK_API_KEY || ''
-      }
+    // 認証チェック
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    // レート制限チェック
+    await checkRateLimit(user?.id, clientIP)
+    
+    // 外部API呼び出し
+    const metadata = await callExternalAPI(url)
+    
+    // 成功ログ記録
+    await logExternalAPIUsage({
+      userId: user?.id,
+      clientIP,
+      url,
+      success: true,
+      responseTime: Date.now() - startTime,
+      source: 'microlink'
     })
     
-    const microlinkData = await microlinkResponse.json()
+    return Response.json({
+      success: true,
+      data: metadata,
+      source: 'external'
+    })
     
-    if (microlinkData.status === 'success') {
-      const metadata = {
-        title: microlinkData.data.title || '',
-        description: microlinkData.data.description || '',
-        image: microlinkData.data.image?.url || '',
-        favicon: microlinkData.data.logo?.url || '',
-        siteName: microlinkData.data.publisher || '',
-        url: microlinkData.data.url || url
-      }
-      
-      return Response.json({
-        success: true,
-        data: metadata,
-        source: 'external'
-      })
-    } else {
-      throw new Error('External API failed')
-    }
   } catch (error) {
+    // 失敗ログ記録
+    await logExternalAPIUsage({
+      userId: (await supabase.auth.getUser()).data.user?.id,
+      clientIP,
+      url,
+      success: false,
+      error: error.message,
+      responseTime: Date.now() - startTime,
+      source: 'microlink'
+    })
+    
     return Response.json({ 
       success: false, 
       error: error.message,
@@ -333,16 +447,123 @@ export async function POST(request: Request) {
     }, { status: 500 })
   }
 }
+
+function getClientIP(request: Request): string {
+  const headersList = headers()
+  
+  return (
+    headersList.get('x-forwarded-for')?.split(',')[0] ||
+    headersList.get('x-real-ip') ||
+    headersList.get('cf-connecting-ip') ||
+    'unknown'
+  )
+}
+
+async function checkRateLimit(userId: string | undefined, clientIP: string): Promise<void> {
+  const now = new Date()
+  const windowStart = new Date(now.getTime() - (userId ? RATE_LIMITS.user.window : RATE_LIMITS.ip.window))
+  
+  // ユーザーIDベースのレート制限（優先）
+  if (userId) {
+    const { count } = await supabase
+      .from('external_api_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('created_at', windowStart.toISOString())
+    
+    if (count && count >= RATE_LIMITS.user.requests) {
+      throw new Error(`Rate limit exceeded for user: ${RATE_LIMITS.user.requests} requests/hour`)
+    }
+  } else {
+    // IPベースのレート制限（フォールバック）
+    const { count } = await supabase
+      .from('external_api_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('client_ip', clientIP)
+      .is('user_id', null)
+      .gte('created_at', windowStart.toISOString())
+    
+    if (count && count >= RATE_LIMITS.ip.requests) {
+      throw new Error(`Rate limit exceeded for IP: ${RATE_LIMITS.ip.requests} requests/hour`)
+    }
+  }
+}
+
+async function callExternalAPI(url: string): Promise<any> {
+  const microlinkResponse = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`, {
+    headers: {
+      'X-API-Key': process.env.MICROLINK_API_KEY || '',
+      'User-Agent': 'EncoreBot/1.0'
+    },
+    signal: AbortSignal.timeout(30000) // 30秒タイムアウト
+  })
+  
+  if (!microlinkResponse.ok) {
+    throw new Error(`Microlink API error: ${microlinkResponse.status} ${microlinkResponse.statusText}`)
+  }
+  
+  const microlinkData = await microlinkResponse.json()
+  
+  if (microlinkData.status !== 'success') {
+    throw new Error(`Microlink API failed: ${microlinkData.message || 'Unknown error'}`)
+  }
+  
+  return {
+    title: microlinkData.data.title || '',
+    description: microlinkData.data.description || '',
+    image: microlinkData.data.image?.url || '',
+    favicon: microlinkData.data.logo?.url || '',
+    siteName: microlinkData.data.publisher || '',
+    url: microlinkData.data.url || url
+  }
+}
+
+async function logExternalAPIUsage(logData: {
+  userId?: string
+  clientIP: string
+  url: string
+  success: boolean
+  responseTime: number
+  source: string
+  error?: string
+}): Promise<void> {
+  try {
+    await supabase.from('external_api_logs').insert({
+      user_id: logData.userId || null,
+      client_ip: logData.clientIP,
+      url: logData.url,
+      success: logData.success,
+      response_time_ms: logData.responseTime,
+      api_source: logData.source,
+      error_message: logData.error || null,
+      created_at: new Date().toISOString()
+    })
+  } catch (error) {
+    console.error('Failed to log external API usage:', error)
+    // ログ失敗は本処理に影響させない
+  }
+}
 ```
 
 ### 統合メタデータサービス
 ```typescript
 // lib/services/metadata/index.ts
+import { normalizeUrl } from '@/lib/url-normalization'
+
 export class MetadataService {
   async extractMetadata(url: string): Promise<LinkPreview> {
-    // 1. Edge でURL正規化
-    const normalizeResult = await this.normalizeUrl(url)
-    const normalizedUrl = normalizeResult.normalizedUrl
+    // 1. 統一モジュールによるURL正規化（直接使用でも可）
+    let normalizedUrl: string
+    
+    // オプション1: Edge経由での正規化（分散処理）
+    try {
+      const normalizeResult = await this.normalizeUrl(url)
+      normalizedUrl = normalizeResult.normalizedUrl
+    } catch (error) {
+      // オプション2: 統一モジュールによる直接正規化（フォールバック）
+      console.warn('Edge normalization failed, using direct normalization:', error)
+      normalizedUrl = normalizeUrl(url)
+    }
     
     // 2. Node でキャッシュチェック
     const cacheCheck = await this.checkCache(normalizedUrl)
@@ -722,6 +943,300 @@ function isLikelyGarbled(html: string): boolean {
   
   return garbledPatterns.some(pattern => pattern.test(html))
 }
+
+function selectBestImage($: any, baseUrl: string): string {
+  const candidates: Array<{
+    url: string
+    width?: number
+    height?: number
+    priority: number
+    isSecure: boolean
+  }> = []
+  
+  // 1. OG画像（secure_url優先、サイズ情報付き）
+  const ogImage = $('meta[property="og:image"]').attr('content')
+  const ogImageSecure = $('meta[property="og:image:secure_url"]').attr('content')
+  const ogImageWidth = parseInt($('meta[property="og:image:width"]').attr('content') || '0')
+  const ogImageHeight = parseInt($('meta[property="og:image:height"]').attr('content') || '0')
+  
+  if (ogImageSecure) {
+    candidates.push({
+      url: ogImageSecure,
+      width: ogImageWidth || undefined,
+      height: ogImageHeight || undefined,
+      priority: 100, // 最高優先度（secure + OG）
+      isSecure: true
+    })
+  } else if (ogImage) {
+    candidates.push({
+      url: ogImage,
+      width: ogImageWidth || undefined,
+      height: ogImageHeight || undefined,
+      priority: 90, // 高優先度（OG）
+      isSecure: ogImage.startsWith('https:')
+    })
+  }
+  
+  // 2. Twitter画像
+  const twitterImage = $('meta[name="twitter:image"]').attr('content')
+  if (twitterImage) {
+    candidates.push({
+      url: twitterImage,
+      priority: 80, // 中高優先度
+      isSecure: twitterImage.startsWith('https:')
+    })
+  }
+  
+  // 3. Apple touch icon（高解像度）
+  $('link[rel="apple-touch-icon"]').each((_: number, elem: any) => {
+    const href = $(elem).attr('href')
+    const sizes = $(elem).attr('sizes')
+    if (href) {
+      let size = 0
+      if (sizes) {
+        const match = sizes.match(/(\d+)x(\d+)/)
+        if (match) {
+          size = parseInt(match[1])
+        }
+      }
+      
+      candidates.push({
+        url: href,
+        width: size || undefined,
+        height: size || undefined,
+        priority: 70, // 中優先度
+        isSecure: href.startsWith('https:')
+      })
+    }
+  })
+  
+  // 4. 通常のリンク（rel="icon"）
+  $('link[rel*="icon"]').each((_: number, elem: any) => {
+    const href = $(elem).attr('href')
+    const sizes = $(elem).attr('sizes')
+    const type = $(elem).attr('type')
+    
+    if (href) {
+      let size = 0
+      if (sizes && sizes !== 'any') {
+        const match = sizes.match(/(\d+)x(\d+)/)
+        if (match) {
+          size = parseInt(match[1])
+        }
+      }
+      
+      // SVGは高優先度
+      const priority = type?.includes('svg') ? 65 : 60
+      
+      candidates.push({
+        url: href,
+        width: size || undefined,
+        height: size || undefined,
+        priority: priority,
+        isSecure: href.startsWith('https:')
+      })
+    }
+  })
+  
+  // 候補のフィルタリング・ソート
+  const filtered = candidates
+    .filter(candidate => {
+      // data:スキーム除外
+      if (candidate.url.startsWith('data:')) return false
+      
+      // 明らかに小さすぎる画像は除外
+      if (candidate.width && candidate.width < 16) return false
+      if (candidate.height && candidate.height < 16) return false
+      
+      return true
+    })
+    .sort((a, b) => {
+      // 1. セキュリティ（HTTPS）優先
+      if (a.isSecure !== b.isSecure) {
+        return b.isSecure ? 1 : -1
+      }
+      
+      // 2. 優先度
+      if (a.priority !== b.priority) {
+        return b.priority - a.priority
+      }
+      
+      // 3. サイズ（大きいほうが高品質）
+      const aSize = (a.width || 0) * (a.height || 0)
+      const bSize = (b.width || 0) * (b.height || 0)
+      
+      if (aSize !== bSize) {
+        return bSize - aSize
+      }
+      
+      return 0
+    })
+  
+  return filtered[0]?.url || ''
+}
+
+function selectBestIcon($: any, baseUrl: string): string {
+  const candidates: Array<{
+    url: string
+    size: number
+    priority: number
+    isSecure: boolean
+  }> = []
+  
+  // 1. Apple touch icon（高解像度）
+  $('link[rel="apple-touch-icon"]').each((_: number, elem: any) => {
+    const href = $(elem).attr('href')
+    const sizes = $(elem).attr('sizes')
+    
+    if (href) {
+      let size = 152 // Apple touch iconのデフォルトサイズ
+      if (sizes) {
+        const match = sizes.match(/(\d+)x(\d+)/)
+        if (match) {
+          size = parseInt(match[1])
+        }
+      }
+      
+      candidates.push({
+        url: href,
+        size,
+        priority: 90, // 高優先度
+        isSecure: href.startsWith('https:')
+      })
+    }
+  })
+  
+  // 2. 通常のアイコン（サイズ指定付き）
+  $('link[rel*="icon"]').each((_: number, elem: any) => {
+    const href = $(elem).attr('href')
+    const sizes = $(elem).attr('sizes')
+    const type = $(elem).attr('type')
+    
+    if (href) {
+      let size = 16 // デフォルトサイズ
+      let priority = 70
+      
+      if (sizes && sizes !== 'any') {
+        const match = sizes.match(/(\d+)x(\d+)/)
+        if (match) {
+          size = parseInt(match[1])
+        }
+      }
+      
+      // SVGは高優先度（解像度に依存しない）
+      if (type?.includes('svg')) {
+        priority = 85
+        size = 1000 // SVGは大サイズ扱い
+      }
+      
+      candidates.push({
+        url: href,
+        size,
+        priority,
+        isSecure: href.startsWith('https:')
+      })
+    }
+  })
+  
+  // 3. フォールバック
+  candidates.push({
+    url: '/favicon.ico',
+    size: 16,
+    priority: 10, // 最低優先度
+    isSecure: false
+  })
+  
+  // 候補のフィルタリング・ソート
+  const filtered = candidates
+    .filter(candidate => {
+      // data:スキーム除外
+      return !candidate.url.startsWith('data:')
+    })
+    .sort((a, b) => {
+      // 1. セキュリティ（HTTPS）優先
+      if (a.isSecure !== b.isSecure) {
+        return b.isSecure ? 1 : -1
+      }
+      
+      // 2. 優先度
+      if (a.priority !== b.priority) {
+        return b.priority - a.priority
+      }
+      
+      // 3. サイズ（大きいほうが高品質）
+      return b.size - a.size
+    })
+  
+  return filtered[0]?.url || '/favicon.ico'
+}
+
+function safeTextTrim(text: string, maxLength: number): string {
+  if (!text || text.length <= maxLength) {
+    return text
+  }
+  
+  // Intl.Segmenterが利用可能かチェック（Node.js 16+、最新ブラウザ）
+  if (typeof Intl.Segmenter !== 'undefined') {
+    try {
+      // 日本語対応の文字素単位でセグメント化
+      const segmenter = new Intl.Segmenter('ja', { granularity: 'grapheme' })
+      const segments = [...segmenter.segment(text)]
+      
+      if (segments.length <= maxLength) {
+        return text
+      }
+      
+      // maxLength文字素まで取得
+      const trimmedSegments = segments.slice(0, maxLength)
+      const trimmedText = trimmedSegments.map(s => s.segment).join('')
+      
+      // 語尾が綺麗になるよう調整
+      return trimmedText + (segments.length > maxLength ? '...' : '')
+      
+    } catch (error) {
+      console.warn('Intl.Segmenter failed, falling back to simple trim:', error)
+    }
+  }
+  
+  // フォールバック: 従来の方法（結合文字で少し安全に）
+  return safeSubstring(text, maxLength) + (text.length > maxLength ? '...' : '')
+}
+
+function safeSubstring(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text
+  }
+  
+  // サロゲートペアを考慮した切り詰め
+  let result = ''
+  let count = 0
+  
+  for (let i = 0; i < text.length && count < maxLength; i++) {
+    const char = text[i]
+    
+    // サロゲートペア（高サロゲート）をチェック
+    if (char.charCodeAt(0) >= 0xD800 && char.charCodeAt(0) <= 0xDBFF) {
+      // 次の文字が低サロゲートかチェック
+      if (i + 1 < text.length) {
+        const nextChar = text[i + 1]
+        if (nextChar.charCodeAt(0) >= 0xDC00 && nextChar.charCodeAt(0) <= 0xDFFF) {
+          // サロゲートペアとして扱う
+          if (count < maxLength) {
+            result += char + nextChar
+            i++ // 次の文字をスキップ
+            count++
+          }
+          continue
+        }
+      }
+    }
+    
+    result += char
+    count++
+  }
+  
+  return result
+}
 ```
 
 ### 依存関係（package.json）
@@ -789,6 +1304,122 @@ export class CacheManager {
     return await this.metadataService.extractMetadata(url)
   }
 }
+```
+
+### 外部APIサマリー集計（日次運用監視）
+```typescript
+// app/api/cron/external-api-summary/route.ts - 外部API使用状況の日次集計
+export const runtime = 'nodejs'
+
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY! // サービスロールキーが必要
+)
+
+export async function GET(request: Request) {
+  // 認証チェック（Vercel Cron Secret）
+  const authHeader = request.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return new Response('Unauthorized', { status: 401 })
+  }
+  
+  try {
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const dateStr = yesterday.toISOString().split('T')[0] // YYYY-MM-DD
+    
+    // API source別に集計
+    const { data: apiSources } = await supabase
+      .from('external_api_logs')
+      .select('api_source')
+      .gte('created_at', `${dateStr}T00:00:00Z`)
+      .lt('created_at', `${dateStr}T23:59:59Z`)
+      .group('api_source')
+    
+    const summaries = []
+    
+    for (const source of apiSources || []) {
+      const { api_source } = source
+      
+      // 詳細集計クエリ
+      const { data: stats } = await supabase
+        .rpc('calculate_external_api_summary', {
+          target_date: dateStr,
+          target_source: api_source
+        })
+      
+      if (stats && stats.length > 0) {
+        const summary = stats[0]
+        
+        // サマリーテーブルに挿入（UPSERT）
+        await supabase
+          .from('external_api_summary')
+          .upsert({
+            date: dateStr,
+            api_source,
+            total_requests: summary.total_requests,
+            success_requests: summary.success_requests,
+            failed_requests: summary.failed_requests,
+            avg_response_time_ms: Math.round(summary.avg_response_time_ms),
+            unique_users: summary.unique_users,
+            unique_ips: summary.unique_ips
+          }, {
+            onConflict: 'date,api_source'
+          })
+        
+        summaries.push({
+          api_source,
+          date: dateStr,
+          ...summary
+        })
+      }
+    }
+    
+    return Response.json({
+      success: true,
+      date: dateStr,
+      summaries
+    })
+    
+  } catch (error) {
+    console.error('External API summary failed:', error)
+    return Response.json({ 
+      success: false, 
+      error: error.message 
+    }, { status: 500 })
+  }
+}
+```
+
+#### PostgreSQL集計関数
+```sql
+-- Supabase DB内で定義する集計関数
+CREATE OR REPLACE FUNCTION calculate_external_api_summary(target_date text, target_source text)
+RETURNS TABLE(
+  total_requests bigint,
+  success_requests bigint,
+  failed_requests bigint,
+  avg_response_time_ms numeric,
+  unique_users bigint,
+  unique_ips bigint
+) 
+LANGUAGE sql
+AS $$
+  SELECT 
+    COUNT(*) as total_requests,
+    COUNT(*) FILTER (WHERE success = true) as success_requests,
+    COUNT(*) FILTER (WHERE success = false) as failed_requests,
+    AVG(response_time_ms) as avg_response_time_ms,
+    COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL) as unique_users,
+    COUNT(DISTINCT client_ip) as unique_ips
+  FROM external_api_logs 
+  WHERE 
+    api_source = target_source 
+    AND created_at >= (target_date || 'T00:00:00Z')::timestamptz
+    AND created_at < (target_date || 'T23:59:59Z')::timestamptz;
+$$;
 ```
 
 ### バックグラウンド再取得（Vercel Cron）
@@ -910,129 +1541,133 @@ export function RefreshPreviewButton({ bookmark }: { bookmark: Bookmark }) {
 
 ## 抽出優先度とデータ正規化
 
-### 抽出優先度
+### 抽出優先度・解像度優先ロジック
 ```typescript
-// タイトル優先度
+// タイトル優先度（変更なし）
 const title = 
   $('meta[property="og:title"]').attr('content') ||
   $('meta[name="twitter:title"]').attr('content') ||
   $('title').text().trim()
 
-// 説明優先度  
+// 説明優先度（Readability強化）
 const description =
   $('meta[property="og:description"]').attr('content') ||
   $('meta[name="twitter:description"]').attr('content') ||
   $('meta[name="description"]').attr('content') ||
-  await extractWithReadability(url) // Nodeのみ
+  await extractWithReadability(url) // Unicode安全なトリミング適用
 
-// 画像優先度
-const image =
-  $('meta[property="og:image"]').attr('content') ||
-  $('meta[name="twitter:image"]').attr('content') ||
-  $('meta[name="twitter:image:src"]').attr('content') ||
-  $('link[rel="apple-touch-icon"]').attr('href') ||
-  $('link[rel="icon"]').attr('href')
+// 画像優先度（大幅強化）
+const image = selectBestImage($, url) // 以下の基準で選択：
+// 1. og:image:secure_url (優先度100, HTTPS保証)
+// 2. og:image + サイズ情報 (優先度90)
+// 3. twitter:image (優先度80)
+// 4. apple-touch-icon + サイズ (優先度70)
+// 5. link[rel="icon"] + SVG対応 (優先度65/60)
+// - HTTPS優先、サイズ優先（大きいほど高品質）
+// - data:スキーム除外、16px未満除外
+
+// アイコン優先度（強化）
+const favicon = selectBestIcon($, url) // 以下の基準で選択：
+// 1. apple-touch-icon + サイズ (優先度90, デフォルト152px)
+// 2. link[rel="icon"] SVG (優先度85, 解像度独立)
+// 3. link[rel="icon"] + サイズ (優先度70)
+// 4. /favicon.ico (優先度10, フォールバック)
+// - HTTPS優先、大サイズ優先、data:スキーム除外
 ```
 
-### データ正規化ルール
+### クライアント・フロントエンド連携
 ```typescript
-export function normalizeUrl(url: string): string {
-  const urlObj = new URL(url)
-  
-  // 1. ホスト名の小文字化
-  urlObj.hostname = urlObj.hostname.toLowerCase()
-  
-  // 2. デフォルトポート削除
-  if ((urlObj.protocol === 'http:' && urlObj.port === '80') ||
-      (urlObj.protocol === 'https:' && urlObj.port === '443')) {
-    urlObj.port = ''
+// components/bookmark-form.tsx - フロントエンドでも統一正規化
+import { normalizeUrl, validateNormalization } from '@/lib/url-normalization'
+
+export function BookmarkForm() {
+  const handleSubmit = (url: string) => {
+    // フロントエンドでも同じ正規化を適用（UX向上）
+    const normalizedUrl = normalizeUrl(url)
+    
+    // 正規化の妥当性を確認
+    if (!validateNormalization(url, normalizedUrl)) {
+      console.warn('URL normalization validation failed')
+    }
+    
+    // 正規化済みURLでブックマーク作成
+    createBookmark(normalizedUrl)
   }
-  
-  // 3. フラグメント除去
-  urlObj.hash = ''
-  
-  // 4. トラッキングパラメータ除去
-  const trackingParams = [
-    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-    'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid', 'ref', 'source'
-  ]
-  
-  trackingParams.forEach(param => {
-    urlObj.searchParams.delete(param)
-  })
-  
-  // 5. クエリキーのソート（残すもの）
-  const sortedParams = new URLSearchParams()
-  Array.from(urlObj.searchParams.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .forEach(([key, value]) => sortedParams.append(key, value))
-  urlObj.search = sortedParams.toString()
-  
-  // 6. 末尾スラッシュ統一（パスがルートでない場合のみ削除）
-  let normalizedUrl = urlObj.toString()
-  if (urlObj.pathname !== '/' && normalizedUrl.endsWith('/')) {
-    normalizedUrl = normalizedUrl.slice(0, -1)
-  }
-  
-  return normalizedUrl
 }
 
-export function makeAbsoluteUrl(href: string, baseUrl: string): string {
-  try {
-    return new URL(href, baseUrl).href
-  } catch {
-    return ''
-  }
-}
+// Chrome拡張機能でも同じ正規化を使用
+// extension/content.js
+import { normalizeUrl } from '@/lib/url-normalization'
+
+chrome.runtime.sendMessage({
+  action: 'saveBookmark',
+  url: normalizeUrl(window.location.href) // 統一正規化適用
+})
 ```
 
 ## 導入順序（現実的な段階実装）
 
 ### Phase 1: コア機能MVP
-1. `/api/preview` NodeルートのCheerio実装（メイン抽出処理）
-2. `link_previews`テーブル作成
-3. 基本URL正規化機能
+1. 統一URL正規化モジュール作成（`lib/url-normalization.ts`）
+2. `/api/preview` NodeルートのCheerio実装（メイン抽出処理）
+3. `link_previews`テーブル作成
 4. ブックマーク保存時のメタデータ連携
 
-### Phase 2: セキュリティ・エンコーディング強化
+### Phase 2: セキュリティ・エンコーディング・画像・文字処理強化
 5. SSRF対策・フェッチガード実装（`lib/security/fetch-guard.ts`）
 6. プライベートIP・localhost・危険ポートブロック
 7. Content-Type制限・リダイレクト制御・サイズ制限
 8. エンコーディング検出機能（Content-Type charset + HTML meta検出）
 9. 日本語サイト対応（Shift_JIS、EUC-JP対応、文字化け自動修復）
+10. 画像・アイコン選択強化（解像度優先、secure_url優先、data:スキーム除外）
+11. Unicode安全なテキストトリミング（Intl.Segmenter、結合文字・サロゲートペア対応）
+12. `<base href>`タグ対応（相対URL解決時に document.baseURI 優先使用）
 
 ### Phase 3: パフォーマンス最適化  
-10. `/api/preview/normalize` Edgeルート（URL正規化）実装
-11. `/api/preview/cache-check` Nodeルート（キャッシュチェック）実装
-12. Readabilityによる本文抜粋強化
-13. 基本キャッシュライフサイクル管理
+13. `/api/preview/normalize` Edgeルート実装（統一正規化モジュール使用）
+14. `/api/preview/cache-check` Nodeルート（キャッシュチェック）実装
+15. フロントエンド・Chrome拡張での統一正規化適用
+16. Readabilityによる本文抜粋強化
+17. 基本キャッシュライフサイクル管理
 
 ### Phase 4: 堅牢性向上
-14. エラーハンドリング強化
-15. フォールバックメタデータ生成
-16. リトライ機能とタイムアウト調整
+18. エラーハンドリング強化
+19. フォールバックメタデータ生成
+20. リトライ機能とタイムアウト調整
 
 ### Phase 5: 外部API連携（オプション）
-17. `/api/preview/external`ルート実装
-18. Microlink API連携
-19. 環境変数で有効/無効切り替え
+21. `/api/preview/external`ルート実装（レート制御・ログ対応）
+22. `external_api_logs`テーブル作成・インデックス設定
+23. ユーザーID + IPベースのレート制限実装（10回/時間 認証、5回/時間 未認証）
+24. レスポンス時間・成功率・エラーメッセージの詳細ログ記録
+25. Microlink API連携・タイムアウト設定
+26. 環境変数で有効/無効切り替え
 
 ### Phase 6: 運用機能
-20. Vercel Cronでのバックグラウンド再取得
-21. 手動再取得ボタン
-22. 特定サイト専用ハンドラー（Twitter、YouTube等）
-23. 多層レートリミット実装
-24. 指数的バックオフによる失敗リンク管理
+27. `external_api_summary`テーブル作成・PostgreSQL集計関数実装
+28. 外部API使用状況の日次集計Cronジョブ（`/api/cron/external-api-summary`）
+29. Vercel Cronでのバックグラウンド再取得
+30. 手動再取得ボタン
+31. 特定サイト専用ハンドラー（Twitter、YouTube等）
+32. 多層レートリミット実装（メタデータ抽出全般）
+33. 指数的バックオフによる失敗リンク管理
 
 ### 技術的な利点
 - **Vercel完全対応**: HTMLRewriterの制約から解放
 - **依存関係明確**: cheerio, jsdom, readability, iconv-liteの組み合わせ
 - **段階的移行可能**: 将来Edge最適化が必要な場合も分離しやすい構成
+- **URL正規化統一**: Edge/Node/Client間で完全に同一の実装による差し戻し対策
 - **セキュリティ強化**: SSRF対策、プライベートIPブロック、サイズ制限等の多層防御
 - **適切な責務分離**: Edge（軽量処理）とNode（DB/複雑処理）の明確な分担
 - **認証セキュリティ**: EdgeでSupabase直参照を避け、RLS制御はNode経由
 - **日本語サイト最適化**: Accept-Language対応による日本語OGP取得安定化
 - **マルチエンコーディング対応**: Shift_JIS、EUC-JP等の日本語サイトでの文字化け回避
 - **インテリジェントデコード**: Content-Type charset検出 + HTML meta補完 + 文字化け自動修復
+- **高品質画像選択**: secure_url優先、解像度ベース選択、data:スキーム除外
+- **最適アイコン選択**: 複数サイズ・形式から最高解像度を自動選択（SVG、Apple touch icon対応）
+- **Unicode完全対応**: Intl.Segmenterによる文字境界認識、結合文字・サロゲートペア安全対応
+- **多言語対応テキスト処理**: 絵文字・合字・アクセント記号での文字化け防止
+- **HTML仕様準拠**: `<base href>`タグによる相対URL解決、document.baseURI優先使用
+- **外部API制御**: ユーザーID + IPベースのレート制限、詳細ログ・サマリー集計による運用監視
 - **デバッグ容易**: Node.jsランタイムで完全なログとエラー情報
 - **メンテナンス性**: 一般的なライブラリによる実装で保守が容易

@@ -238,6 +238,47 @@ CREATE TABLE bookmark_metadata (
 -- }
 ```
 
+#### 7. external_api_logs（外部APIログ・レート制御）
+```sql
+CREATE TABLE external_api_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  client_ip inet NOT NULL,
+  url text NOT NULL,
+  api_source text NOT NULL, -- 'microlink', 'twitter' など
+  success boolean NOT NULL,
+  response_time_ms integer NOT NULL,
+  error_message text,
+  created_at timestamp with time zone DEFAULT now()
+);
+
+-- レート制限チェック用インデックス（高速化）
+CREATE INDEX idx_external_api_logs_user_time ON external_api_logs(user_id, created_at);
+CREATE INDEX idx_external_api_logs_ip_time ON external_api_logs(client_ip, created_at) WHERE user_id IS NULL;
+-- 運用・分析用インデックス
+CREATE INDEX idx_external_api_logs_source_success ON external_api_logs(api_source, success, created_at);
+```
+
+#### 8. external_api_summary（日次サマリー・運用監視）
+```sql
+CREATE TABLE external_api_summary (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  date date NOT NULL,
+  api_source text NOT NULL,
+  total_requests integer NOT NULL DEFAULT 0,
+  success_requests integer NOT NULL DEFAULT 0,
+  failed_requests integer NOT NULL DEFAULT 0,
+  avg_response_time_ms integer NOT NULL DEFAULT 0,
+  unique_users integer NOT NULL DEFAULT 0,
+  unique_ips integer NOT NULL DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  UNIQUE(date, api_source)
+);
+
+-- 日次集計用インデックス
+CREATE INDEX idx_external_api_summary_date_source ON external_api_summary(date, api_source);
+```
+
 ### インデックス設計
 ```sql
 -- パフォーマンス最適化用インデックス
