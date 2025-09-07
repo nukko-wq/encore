@@ -80,6 +80,7 @@ create table if not exists public.bookmarks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   url text not null,
+  canonical_url text not null, -- 正規化済みURL（重複防止用）
   title text,
   description text,
   thumbnail_url text,
@@ -235,6 +236,10 @@ CREATE INDEX idx_bookmarks_user_created_at ON bookmarks(user_id, created_at DESC
 CREATE INDEX idx_bookmarks_user_favorite ON bookmarks(user_id, is_favorite);
 CREATE INDEX idx_bookmarks_user_pinned ON bookmarks(user_id, is_pinned);
 CREATE INDEX idx_bookmarks_url ON bookmarks(url);
+
+-- URL重複防止用ユニークインデックス
+CREATE UNIQUE INDEX uniq_bookmarks_user_canonical 
+  ON bookmarks (user_id, canonical_url);
 CREATE INDEX idx_tags_user_id ON tags(user_id);
 CREATE INDEX idx_bookmark_tags_bookmark_id ON bookmark_tags(bookmark_id);
 CREATE INDEX idx_bookmark_tags_tag_id ON bookmark_tags(tag_id);
@@ -385,9 +390,9 @@ export interface Database {
         Update: { email?: string }
       }
       bookmarks: {
-        Row: BookmarkRow
-        Insert: BookmarkInsert
-        Update: BookmarkUpdate
+        Row: BookmarkRow & { canonical_url: string }
+        Insert: BookmarkInsert & { canonical_url: string }
+        Update: BookmarkUpdate & { canonical_url?: string }
       }
       tags: {
         Row: TagRow
@@ -511,12 +516,14 @@ export class BookmarkService {
     const bookmarkData: BookmarkInsert = {
       user_id: user.id,
       url: data.url,
+      canonical_url: this.normalizeUrl(data.url), // 正規化済みURL
       title: data.title || metadata.title || 'Untitled',
       description: data.description || metadata.description,
       thumbnail_url: metadata.image
     }
     
     // RLSポリシーでホワイトリスト＆所有者チェックが自動実行
+    // canonical_urlのユニーク制約により重複は自動で防止される
     const { data: bookmark, error } = await supabase
       .from('bookmarks')
       .insert(bookmarkData)
@@ -524,6 +531,10 @@ export class BookmarkService {
       .single()
     
     if (error) {
+      // 重複URLの場合のエラーハンドリング
+      if (error.code === '23505') { // unique_violation
+        throw new Error('このURLは既に保存されています')
+      }
       throw new Error(`Failed to create bookmark: ${error.message}`)
     }
     
@@ -621,9 +632,28 @@ export class BookmarkService {
     return !metadata.title || !metadata.image || !metadata.description
   }
   
+  // URL正規化（重複防止用）
   private normalizeUrl(url: string): string {
-    // トラッキングクエリ除去・末尾スラッシュ統一
-    return url.replace(/[?&](utm_|fbclid|gclid)[^&]*(&|$)/g, '').replace(/\/$/, '')
+    try {
+      const urlObj = new URL(url)
+      
+      // トラッキングパラメータ除去
+      const trackingParams = [
+        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+        'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid'
+      ]
+      
+      trackingParams.forEach(param => {
+        urlObj.searchParams.delete(param)
+      })
+      
+      // 末尾スラッシュ統一
+      return urlObj.toString().replace(/\/$/, '')
+    } catch (error) {
+      // URL形式エラー時は元のURLを返す
+      console.warn('URL normalization failed:', error)
+      return url
+    }
   }
   
   async updateBookmark(id: string, updates: Partial<BookmarkRow>): Promise<BookmarkRow> {
@@ -667,6 +697,54 @@ export class BookmarkService {
     
     // Twitter API v2 呼び出し（制限内で）
     // 追加情報を bookmark_metadata テーブルに保存
+  }
+  
+  // 重複チェック用メソッド（オプション機能）
+  async checkDuplicate(url: string): Promise<BookmarkRow | null> {
+    const canonicalUrl = this.normalizeUrl(url)
+    
+    const { data, error } = await supabase
+      .from('bookmarks')
+      .select('*')
+      .eq('canonical_url', canonicalUrl)
+      .single()
+    
+    return data || null
+  }
+  
+  // 重複時の処理オプション（仕様に応じて選択）
+  async createBookmarkWithDuplicateHandling(
+    data: { url: string; title?: string; description?: string },
+    duplicateAction: 'reject' | 'update' | 'allow-different-url' = 'reject'
+  ): Promise<BookmarkRow> {
+    const canonicalUrl = this.normalizeUrl(data.url)
+    
+    // 重複チェック
+    const existing = await this.checkDuplicate(data.url)
+    
+    if (existing) {
+      switch (duplicateAction) {
+        case 'reject':
+          throw new Error('このURLは既に保存されています')
+        case 'update':
+          // 既存のブックマークを更新
+          return this.updateBookmark(existing.id, {
+            title: data.title || existing.title,
+            description: data.description || existing.description,
+            updated_at: new Date().toISOString()
+          })
+        case 'allow-different-url':
+          // 元URLが異なる場合は保存を許可
+          if (existing.url !== data.url) {
+            break // 通常の保存処理へ
+          } else {
+            throw new Error('このURLは既に保存されています')
+          }
+      }
+    }
+    
+    // 通常の保存処理
+    return this.createBookmark(data)
   }
 }
 ```
