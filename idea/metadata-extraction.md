@@ -26,63 +26,106 @@ src/
 │           └── index.ts              -- 統合サービス
 ```
 
-## メタデータ抽出システム設計（三段構え）
+## メタデータ抽出システム設計（現実解）
+
+### 実装方針（Vercel対応）
+- **Edge**: 認可チェック、軽量リダイレクト、キャッシュ判定など"薄い"処理のみ
+- **Node**: URL取得→HTML取得→OGP/メタ抽出→本文抜粋の実質的処理
+- **HTMLRewriter**: Vercelで使用不可のため、Cheerioで代替
 
 ### APIルート構成
 
-#### Edge超軽量抽出
+#### メインメタデータ抽出（Node）
 ```typescript
-// app/api/extract/route.ts - Edge超軽量抽出
-export const runtime = 'edge'
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const url = searchParams.get('url')
-  
-  if (!url) return Response.json({ error: 'URL required' }, { status: 400 })
-  
-  try {
-    const response = await fetch(url, {
-      headers: { 'User-Agent': 'EncoreMetaBot/1.0' },
-      signal: AbortSignal.timeout(5000)
-    })
-    
-    const html = await response.text()
-    
-    // HTMLRewriterで軽量抽出
-    const metadata = await extractWithHTMLRewriter(html, url)
-    
-    return Response.json({
-      success: true,
-      data: metadata,
-      source: 'edge',
-      complete: isComplete(metadata)
-    })
-  } catch (error) {
-    return Response.json({ 
-      success: false, 
-      error: error.message,
-      source: 'edge' 
-    }, { status: 500 })
-  }
-}
-```
-
-#### Node精度重視
-```typescript
-// app/api/extract/deep/route.ts - Node精度重視
+// app/api/preview/route.ts - メイン抽出処理（Node.js Runtime）
 export const runtime = 'nodejs'
+
+import * as cheerio from 'cheerio'
+import { Readability } from '@mozilla/readability'
+import { JSDOM } from 'jsdom'
 
 export async function POST(request: Request) {
   const { url } = await request.json()
   
+  if (!url) return Response.json({ error: 'URL required' }, { status: 400 })
+  
   try {
-    // metascraperで統合取得
-    const metadata = await extractWithMetascraper(url)
+    // URL取得
+    const response = await fetch(url, {
+      headers: { 
+        'User-Agent': 'EncoreBot/1.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      signal: AbortSignal.timeout(10000)
+    })
     
-    // descriptionが無い時はReadabilityで本文抜粋
-    if (!metadata.description) {
-      metadata.description = await extractContentWithReadability(url)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    
+    const html = await response.text()
+    const $ = cheerio.load(html)
+    
+    // OGP/メタデータ抽出（優先度順）
+    const title = 
+      $('meta[property="og:title"]').attr('content') ||
+      $('meta[name="twitter:title"]').attr('content') ||
+      $('title').text().trim() ||
+      ''
+    
+    const description = 
+      $('meta[property="og:description"]').attr('content') ||
+      $('meta[name="twitter:description"]').attr('content') ||
+      $('meta[name="description"]').attr('content') ||
+      ''
+    
+    const image = 
+      $('meta[property="og:image"]').attr('content') ||
+      $('meta[name="twitter:image"]').attr('content') ||
+      $('link[rel="apple-touch-icon"]').attr('href') ||
+      ''
+    
+    const siteName = 
+      $('meta[property="og:site_name"]').attr('content') ||
+      $('meta[name="application-name"]').attr('content') ||
+      ''
+    
+    const favicon = 
+      $('link[rel="icon"]').attr('href') ||
+      $('link[rel="shortcut icon"]').attr('href') ||
+      '/favicon.ico'
+    
+    // 相対URLを絶対URLに変換
+    const absoluteImage = image ? new URL(image, url).href : ''
+    const absoluteFavicon = favicon ? new URL(favicon, url).href : ''
+    
+    // descriptionが無い場合はReadabilityで本文抜粋
+    let extractedDescription = description
+    if (!extractedDescription && html) {
+      try {
+        const dom = new JSDOM(html, { url })
+        const reader = new Readability(dom.window.document)
+        const article = reader.parse()
+        
+        if (article?.textContent) {
+          // 日本語対応: 全角160-200文字程度に制限
+          extractedDescription = article.textContent
+            .replace(/\s+/g, ' ')
+            .trim()
+            .substring(0, 200) + (article.textContent.length > 200 ? '...' : '')
+        }
+      } catch (readabilityError) {
+        console.warn('Readability extraction failed:', readabilityError)
+      }
+    }
+    
+    const metadata = {
+      title,
+      description: extractedDescription,
+      image: absoluteImage,
+      favicon: absoluteFavicon,
+      siteName,
+      url
     }
     
     return Response.json({
@@ -90,6 +133,7 @@ export async function POST(request: Request) {
       data: metadata,
       source: 'node'
     })
+    
   } catch (error) {
     return Response.json({ 
       success: false, 
@@ -100,9 +144,92 @@ export async function POST(request: Request) {
 }
 ```
 
-#### 外部APIフォールバック
+#### Edge軽量処理（認可・キャッシュ制御）
 ```typescript
-// app/api/extract/external/route.ts - 外部APIフォールバック
+// app/api/preview/check/route.ts - Edge軽量処理
+export const runtime = 'edge'
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const url = searchParams.get('url')
+  
+  if (!url) return Response.json({ error: 'URL required' }, { status: 400 })
+  
+  try {
+    // URL正規化
+    const normalizedUrl = normalizeUrl(url)
+    
+    // キャッシュチェック（Supabase）
+    const cached = await checkCachedPreview(normalizedUrl)
+    
+    if (cached && !shouldRevalidate(cached)) {
+      return Response.json({
+        cached: true,
+        data: cached,
+        source: 'cache'
+      })
+    }
+    
+    // キャッシュが無い、または期限切れの場合
+    return Response.json({
+      cached: false,
+      shouldFetch: true,
+      normalizedUrl
+    })
+    
+  } catch (error) {
+    return Response.json({ 
+      success: false, 
+      error: error.message,
+      source: 'edge' 
+    }, { status: 500 })
+  }
+}
+
+function normalizeUrl(url: string): string {
+  const urlObj = new URL(url)
+  
+  // ホスト名の小文字化
+  urlObj.hostname = urlObj.hostname.toLowerCase()
+  
+  // デフォルトポート削除
+  if ((urlObj.protocol === 'http:' && urlObj.port === '80') ||
+      (urlObj.protocol === 'https:' && urlObj.port === '443')) {
+    urlObj.port = ''
+  }
+  
+  // フラグメント除去
+  urlObj.hash = ''
+  
+  // トラッキングパラメータ除去
+  const trackingParams = [
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+    'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid', 'ref', 'source'
+  ]
+  trackingParams.forEach(param => urlObj.searchParams.delete(param))
+  
+  // クエリキーのソート
+  const sortedParams = new URLSearchParams()
+  Array.from(urlObj.searchParams.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([key, value]) => sortedParams.append(key, value))
+  urlObj.search = sortedParams.toString()
+  
+  // 末尾スラッシュ統一
+  let normalizedUrl = urlObj.toString()
+  if (urlObj.pathname !== '/' && normalizedUrl.endsWith('/')) {
+    normalizedUrl = normalizedUrl.slice(0, -1)
+  }
+  
+  return normalizedUrl
+}
+```
+
+#### 外部APIフォールバック（オプション）
+```typescript
+// app/api/preview/external/route.ts - 外部APIフォールバック
+export const runtime = 'nodejs'
+
 export async function POST(request: Request) {
   if (process.env.METADATA_EXTERNAL_ENABLED !== 'true') {
     return Response.json({ error: 'External API disabled' }, { status: 403 })
@@ -111,13 +238,33 @@ export async function POST(request: Request) {
   const { url } = await request.json()
   
   try {
-    const metadata = await extractWithExternalAPI(url)
-    
-    return Response.json({
-      success: true,
-      data: metadata,
-      source: 'external'
+    // Microlink APIを使用（例）
+    const microlinkResponse = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`, {
+      headers: {
+        'X-API-Key': process.env.MICROLINK_API_KEY || ''
+      }
     })
+    
+    const microlinkData = await microlinkResponse.json()
+    
+    if (microlinkData.status === 'success') {
+      const metadata = {
+        title: microlinkData.data.title || '',
+        description: microlinkData.data.description || '',
+        image: microlinkData.data.image?.url || '',
+        favicon: microlinkData.data.logo?.url || '',
+        siteName: microlinkData.data.publisher || '',
+        url: microlinkData.data.url || url
+      }
+      
+      return Response.json({
+        success: true,
+        data: metadata,
+        source: 'external'
+      })
+    } else {
+      throw new Error('External API failed')
+    }
   } catch (error) {
     return Response.json({ 
       success: false, 
@@ -135,74 +282,97 @@ export class MetadataService {
   async extractMetadata(url: string): Promise<LinkPreview> {
     const normalizedUrl = this.normalizeUrl(url)
     
-    // 1. キャッシュチェック
-    const cached = await this.getCachedPreview(normalizedUrl)
-    if (cached && !this.shouldRevalidate(cached)) {
-      return cached
+    // 1. Edge でキャッシュチェック
+    const cacheCheck = await this.checkCache(normalizedUrl)
+    if (cacheCheck.cached) {
+      return cacheCheck.data
     }
     
     let metadata: Partial<LinkPreview> = {}
-    let source = 'edge'
+    let source = 'node'
     
-    // 2. Edge超軽量抽出
+    // 2. Node でメイン抽出処理
     try {
-      const edgeResult = await this.callEdgeExtractor(normalizedUrl)
-      metadata = edgeResult.data
+      const nodeResult = await this.callNodeExtractor(normalizedUrl)
+      metadata = nodeResult.data
+      source = 'node'
+    } catch (nodeError) {
+      console.warn('Node extraction failed:', nodeError)
       
-      // 完全でない場合は次の段階へ
-      if (!edgeResult.complete) {
-        // 3. Node精度重視
+      // 3. 外部APIフォールバック（オプション）
+      if (process.env.METADATA_EXTERNAL_ENABLED === 'true') {
         try {
-          const nodeResult = await this.callNodeExtractor(normalizedUrl)
-          metadata = { ...metadata, ...nodeResult.data }
-          source = 'node'
-        } catch (nodeError) {
-          console.warn('Node extraction failed:', nodeError)
-          
-          // 4. 外部APIフォールバック
-          if (process.env.METADATA_EXTERNAL_ENABLED === 'true') {
-            try {
-              const externalResult = await this.callExternalExtractor(normalizedUrl)
-              metadata = { ...metadata, ...externalResult.data }
-              source = 'external'
-            } catch (externalError) {
-              console.warn('External API failed:', externalError)
-            }
-          }
+          const externalResult = await this.callExternalExtractor(normalizedUrl)
+          metadata = externalResult.data
+          source = 'external'
+        } catch (externalError) {
+          console.warn('External API failed:', externalError)
+          // フォールバック: 最低限のメタデータを生成
+          metadata = this.generateFallbackMetadata(normalizedUrl)
+          source = 'fallback'
         }
+      } else {
+        // 外部API無効時のフォールバック
+        metadata = this.generateFallbackMetadata(normalizedUrl)
+        source = 'fallback'
       }
-    } catch (edgeError) {
-      console.warn('Edge extraction failed:', edgeError)
-      // Edgeで失敗した場合は直接Nodeへ
     }
     
-    // 5. 特定サイト専用処理
+    // 4. 特定サイト専用処理（オプション）
     const handler = this.getSiteHandler(normalizedUrl)
     if (handler) {
       metadata = await handler(normalizedUrl, metadata)
     }
     
-    // 6. キャッシュ保存と返却
+    // 5. キャッシュ保存と返却
     const preview = await this.savePreviewCache(normalizedUrl, metadata, source)
     return preview
   }
   
-  private async callEdgeExtractor(url: string) {
-    const response = await fetch(`/api/extract?url=${encodeURIComponent(url)}`)
+  private async checkCache(url: string) {
+    const response = await fetch(`/api/preview/check?url=${encodeURIComponent(url)}`)
     return await response.json()
   }
   
   private async callNodeExtractor(url: string) {
-    const response = await fetch('/api/extract/deep', {
+    const response = await fetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url })
     })
+    
+    if (!response.ok) {
+      throw new Error(`Node extraction failed: ${response.statusText}`)
+    }
+    
     return await response.json()
   }
   
-  private shouldRevalidate(cached: LinkPreview): boolean {
-    return new Date() > new Date(cached.revalidate_at)
+  private async callExternalExtractor(url: string) {
+    const response = await fetch('/api/preview/external', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    })
+    
+    if (!response.ok) {
+      throw new Error(`External extraction failed: ${response.statusText}`)
+    }
+    
+    return await response.json()
+  }
+  
+  private generateFallbackMetadata(url: string): Partial<LinkPreview> {
+    const urlObj = new URL(url)
+    
+    return {
+      title: `${urlObj.hostname}`,
+      description: `Link to ${urlObj.hostname}`,
+      image: '',
+      favicon: `${urlObj.protocol}//${urlObj.hostname}/favicon.ico`,
+      siteName: urlObj.hostname,
+      url
+    }
   }
   
   private normalizeUrl(url: string): string {
@@ -242,78 +412,45 @@ export class MetadataService {
     
     return normalizedUrl
   }
+  
+  private getSiteHandler(url: string): ((url: string, metadata: any) => Promise<any>) | null {
+    const urlObj = new URL(url)
+    
+    // Twitter/X専用ハンドラー（将来実装）
+    if (urlObj.hostname.includes('twitter.com') || urlObj.hostname.includes('x.com')) {
+      return this.handleTwitter
+    }
+    
+    // YouTube専用ハンドラー（将来実装）
+    if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
+      return this.handleYoutube
+    }
+    
+    return null
+  }
+  
+  private async handleTwitter(url: string, metadata: any) {
+    // Twitter専用処理（将来実装）
+    return metadata
+  }
+  
+  private async handleYoutube(url: string, metadata: any) {
+    // YouTube専用処理（将来実装）
+    return metadata
+  }
 }
 ```
 
-### Edge抽出器（HTMLRewriter）
-```typescript
-// lib/extractors/edge.ts
-class MetaExtractor {
-  title = ''
-  description = ''
-  image = ''
-  favicon = ''
-  
-  element(element: Element) {
-    const property = element.getAttribute('property')
-    const name = element.getAttribute('name')
-    const content = element.getAttribute('content')
-    
-    if (!content) return
-    
-    // タイトルの優先度
-    if (!this.title) {
-      if (property === 'og:title' || name === 'twitter:title') {
-        this.title = content
-      }
-    }
-    
-    // 説明の優先度
-    if (!this.description) {
-      if (property === 'og:description' || name === 'twitter:description' || name === 'description') {
-        this.description = content
-      }
-    }
-    
-    // 画像の優先度
-    if (!this.image) {
-      if (property === 'og:image' || name === 'twitter:image') {
-        this.image = new URL(content, this.baseUrl).href
-      }
-    }
-  }
-}
-
-export async function extractWithHTMLRewriter(html: string, baseUrl: string) {
-  const extractor = new MetaExtractor()
-  
-  const rewriter = new HTMLRewriter()
-    .on('meta', extractor)
-    .on('title', {
-      text(text) {
-        if (!extractor.title) {
-          extractor.title = text.text
-        }
-      }
-    })
-    .on('link[rel="icon"], link[rel="apple-touch-icon"]', {
-      element(element) {
-        if (!extractor.favicon) {
-          const href = element.getAttribute('href')
-          if (href) {
-            extractor.favicon = new URL(href, baseUrl).href
-          }
-        }
-      }
-    })
-  
-  await rewriter.transform(new Response(html)).text()
-  
-  return {
-    title: extractor.title,
-    description: extractor.description,
-    image: extractor.image,
-    favicon: extractor.favicon
+### 依存関係（package.json）
+```json
+{
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "@mozilla/readability": "^0.4.4",
+    "jsdom": "^23.0.1"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.6"
   }
 }
 ```
@@ -564,27 +701,39 @@ export function makeAbsoluteUrl(href: string, baseUrl: string): string {
 }
 ```
 
-## 導入順序（小さく始めて伸ばせる）
+## 導入順序（現実的な段階実装）
 
-### Phase 1: Edge Only MVP
-1. `/api/extract` EdgeルートのHTMLRewriter実装
+### Phase 1: コア機能MVP
+1. `/api/preview` NodeルートのCheerio実装（メイン抽出処理）
 2. `link_previews`テーブル作成
-3. 基本キャッシュ機能
-4. ブックマーク保存時のEdge抽出連携
+3. 基本URL正規化機能
+4. ブックマーク保存時のメタデータ連携
 
-### Phase 2: Nodeフォールバック追加
-5. `/api/extract/deep` Nodeルートのmetascraper実装
-6. Readabilityによる本文抜粋機能
-7. Edge→Nodeのフォールバックロジック
+### Phase 2: パフォーマンス最適化
+5. `/api/preview/check` Edgeルートのキャッシュチェック実装
+6. Readabilityによる本文抜粋強化
+7. 基本キャッシュライフサイクル管理
 
-### Phase 3: 外部APIオプション
-8. `/api/extract/external`ルート実装
-9. Microlink API連携
-10. 環境変数で有効/無効切り替え
+### Phase 3: 堅牢性向上
+8. エラーハンドリング強化
+9. フォールバックメタデータ生成
+10. リトライ機能とタイムアウト調整
 
-### Phase 4: 運用機能
-11. Vercel Cronでのバックグラウンド再取得（運用ポリシー含む）
-12. 手動再取得ボタン
-13. 多層レートリミット実装（ユーザーID + IP）
-14. キャッシュ統計とモニタリング
-15. 指数的バックオフによる失敗リンク管理
+### Phase 4: 外部API連携（オプション）
+11. `/api/preview/external`ルート実装
+12. Microlink API連携
+13. 環境変数で有効/無効切り替え
+
+### Phase 5: 運用機能
+14. Vercel Cronでのバックグラウンド再取得
+15. 手動再取得ボタン
+16. 特定サイト専用ハンドラー（Twitter、YouTube等）
+17. 多層レートリミット実装
+18. 指数的バックオフによる失敗リンク管理
+
+### 技術的な利点
+- **Vercel完全対応**: HTMLRewriterの制約から解放
+- **依存関係明確**: cheerio, jsdom, readabilityの組み合わせ
+- **段階的移行可能**: 将来Edge最適化が必要な場合も分離しやすい構成
+- **デバッグ容易**: Node.jsランタイムで完全なログとエラー情報
+- **メンテナンス性**: 一般的なライブラリによる実装で保守が容易
