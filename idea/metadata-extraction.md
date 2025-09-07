@@ -206,13 +206,41 @@ export class MetadataService {
   }
   
   private normalizeUrl(url: string): string {
-    // トラッキングパラメータ除去
     const urlObj = new URL(url)
-    const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'fbclid', 'gclid']
+    
+    // 1. ホスト名の小文字化
+    urlObj.hostname = urlObj.hostname.toLowerCase()
+    
+    // 2. デフォルトポート削除
+    if ((urlObj.protocol === 'http:' && urlObj.port === '80') ||
+        (urlObj.protocol === 'https:' && urlObj.port === '443')) {
+      urlObj.port = ''
+    }
+    
+    // 3. フラグメント除去
+    urlObj.hash = ''
+    
+    // 4. トラッキングパラメータ除去
+    const trackingParams = [
+      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+      'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid', 'ref', 'source'
+    ]
     trackingParams.forEach(param => urlObj.searchParams.delete(param))
     
-    // 末尾スラッシュ統一
-    return urlObj.toString().replace(/\/$/, '')
+    // 5. クエリキーのソート（残すもの）
+    const sortedParams = new URLSearchParams()
+    Array.from(urlObj.searchParams.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([key, value]) => sortedParams.append(key, value))
+    urlObj.search = sortedParams.toString()
+    
+    // 6. 末尾スラッシュ統一（パスがルートでない場合のみ削除）
+    let normalizedUrl = urlObj.toString()
+    if (urlObj.pathname !== '/' && normalizedUrl.endsWith('/')) {
+      normalizedUrl = normalizedUrl.slice(0, -1)
+    }
+    
+    return normalizedUrl
   }
 }
 ```
@@ -489,18 +517,42 @@ const image =
 export function normalizeUrl(url: string): string {
   const urlObj = new URL(url)
   
-  // トラッキングパラメータ除去
+  // 1. ホスト名の小文字化
+  urlObj.hostname = urlObj.hostname.toLowerCase()
+  
+  // 2. デフォルトポート削除
+  if ((urlObj.protocol === 'http:' && urlObj.port === '80') ||
+      (urlObj.protocol === 'https:' && urlObj.port === '443')) {
+    urlObj.port = ''
+  }
+  
+  // 3. フラグメント除去
+  urlObj.hash = ''
+  
+  // 4. トラッキングパラメータ除去
   const trackingParams = [
     'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-    'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid'
+    'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid', 'ref', 'source'
   ]
   
   trackingParams.forEach(param => {
     urlObj.searchParams.delete(param)
   })
   
-  // 末尾スラッシュ統一
-  return urlObj.toString().replace(/\/$/, '')
+  // 5. クエリキーのソート（残すもの）
+  const sortedParams = new URLSearchParams()
+  Array.from(urlObj.searchParams.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([key, value]) => sortedParams.append(key, value))
+  urlObj.search = sortedParams.toString()
+  
+  // 6. 末尾スラッシュ統一（パスがルートでない場合のみ削除）
+  let normalizedUrl = urlObj.toString()
+  if (urlObj.pathname !== '/' && normalizedUrl.endsWith('/')) {
+    normalizedUrl = normalizedUrl.slice(0, -1)
+  }
+  
+  return normalizedUrl
 }
 
 export function makeAbsoluteUrl(href: string, baseUrl: string): string {
