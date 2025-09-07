@@ -23,7 +23,7 @@ EncoreはPocketやはてなブックマークのような「後で読む」サ�
 - **バックエンド**: Next.js API Routes + Supabase
 - **データベース**: Supabase (PostgreSQL)
 - **認証**: Supabase Auth (Google Provider + RLS)
-- **ホスティング**: Vercel
+- **ホスティング**: Vercel（Hobbyプラン）
 - **拡張機能**: Chrome Extension
 - **メタデータ取得**: 自前実装（Phase1）→ 外部APIフォールバック（Phase2）→ 専用パーサー（Phase3）
 - **外部API**: Microlink API等（フォールバック）、Twitter API（将来オプション）
