@@ -7,11 +7,13 @@ src/
 ├── app/
 │   ├── api/
 │   │   ├── preview/
-│   │   │   ├── route.ts          -- メインメタデータ抽出
-│   │   │   ├── check/
-│   │   │   │   └── route.ts      -- キャッシュチェック
+│   │   │   ├── route.ts          -- メインメタデータ抽出（Node）
+│   │   │   ├── normalize/
+│   │   │   │   └── route.ts      -- URL正規化（Edge）
+│   │   │   ├── cache-check/
+│   │   │   │   └── route.ts      -- キャッシュチェック（Node）
 │   │   │   └── external/
-│   │   │       └── route.ts      -- 外部APIフォールバック
+│   │   │       └── route.ts      -- 外部APIフォールバック（Node）
 │   │   ├── cron/
 │   │   │   └── revalidate/
 │   │   │       └── route.ts      -- バックグラウンド再取得
@@ -42,6 +44,7 @@ export const runtime = 'nodejs'
 import * as cheerio from 'cheerio'
 import { Readability } from '@mozilla/readability'
 import { JSDOM } from 'jsdom'
+import { validateUrlForFetch, safeFetch } from '@/lib/security/fetch-guard'
 
 export async function POST(request: Request) {
   const { url } = await request.json()
@@ -49,20 +52,11 @@ export async function POST(request: Request) {
   if (!url) return Response.json({ error: 'URL required' }, { status: 400 })
   
   try {
-    // URL取得
-    const response = await fetch(url, {
-      headers: { 
-        'User-Agent': 'EncoreBot/1.0',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      },
-      signal: AbortSignal.timeout(10000)
-    })
+    // SSRF対策: URL検証
+    await validateUrlForFetch(url)
     
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-    
-    const html = await response.text()
+    // セキュアなfetch処理
+    const html = await safeFetch(url)
     const $ = cheerio.load(html)
     
     // OGP/メタデータ抽出（優先度順）
@@ -143,9 +137,9 @@ export async function POST(request: Request) {
 }
 ```
 
-#### Edge軽量処理（認可・キャッシュ制御）
+#### Edge軽量処理（URL正規化・認証チェック）
 ```typescript
-// app/api/preview/check/route.ts - Edge軽量処理
+// app/api/preview/normalize/route.ts - Edge軽量処理（URL正規化のみ）
 export const runtime = 'edge'
 
 export async function GET(request: Request) {
@@ -155,25 +149,17 @@ export async function GET(request: Request) {
   if (!url) return Response.json({ error: 'URL required' }, { status: 400 })
   
   try {
-    // URL正規化
+    // URL正規化のみ（軽量処理）
     const normalizedUrl = normalizeUrl(url)
     
-    // キャッシュチェック（Supabase）
-    const cached = await checkCachedPreview(normalizedUrl)
+    // 基本的なURL検証
+    validateBasicUrl(normalizedUrl)
     
-    if (cached && !shouldRevalidate(cached)) {
-      return Response.json({
-        cached: true,
-        data: cached,
-        source: 'cache'
-      })
-    }
-    
-    // キャッシュが無い、または期限切れの場合
     return Response.json({
-      cached: false,
-      shouldFetch: true,
-      normalizedUrl
+      success: true,
+      originalUrl: url,
+      normalizedUrl,
+      source: 'edge'
     })
     
   } catch (error) {
@@ -181,7 +167,16 @@ export async function GET(request: Request) {
       success: false, 
       error: error.message,
       source: 'edge' 
-    }, { status: 500 })
+    }, { status: 400 })
+  }
+}
+
+function validateBasicUrl(url: string): void {
+  const urlObj = new URL(url)
+  
+  // プロトコル制限
+  if (!['http:', 'https:'].includes(urlObj.protocol)) {
+    throw new Error(`Unsupported protocol: ${urlObj.protocol}`)
   }
 }
 
@@ -221,6 +216,72 @@ function normalizeUrl(url: string): string {
   }
   
   return normalizedUrl
+}
+```
+
+#### Node キャッシュチェック API
+```typescript
+// app/api/preview/cache-check/route.ts - Node キャッシュチェック
+export const runtime = 'nodejs'
+
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+export async function POST(request: Request) {
+  const { normalizedUrl } = await request.json()
+  
+  if (!normalizedUrl) {
+    return Response.json({ error: 'Normalized URL required' }, { status: 400 })
+  }
+  
+  try {
+    // 認証チェック（RLSで自動制御）
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return Response.json({ error: 'Authentication required' }, { status: 401 })
+    }
+    
+    // キャッシュチェック
+    const { data: cached, error } = await supabase
+      .from('link_previews')
+      .select('*')
+      .eq('url', normalizedUrl)
+      .single()
+    
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+      throw error
+    }
+    
+    if (cached && !shouldRevalidate(cached)) {
+      return Response.json({
+        cached: true,
+        data: cached,
+        source: 'cache'
+      })
+    }
+    
+    // キャッシュが無い、または期限切れの場合
+    return Response.json({
+      cached: false,
+      shouldFetch: true,
+      normalizedUrl
+    })
+    
+  } catch (error) {
+    return Response.json({ 
+      success: false, 
+      error: error.message,
+      source: 'node' 
+    }, { status: 500 })
+  }
+}
+
+function shouldRevalidate(cached: any): boolean {
+  return new Date() > new Date(cached.revalidate_at)
 }
 ```
 
@@ -279,9 +340,11 @@ export async function POST(request: Request) {
 // lib/services/metadata/index.ts
 export class MetadataService {
   async extractMetadata(url: string): Promise<LinkPreview> {
-    const normalizedUrl = this.normalizeUrl(url)
+    // 1. Edge でURL正規化
+    const normalizeResult = await this.normalizeUrl(url)
+    const normalizedUrl = normalizeResult.normalizedUrl
     
-    // 1. Edge でキャッシュチェック
+    // 2. Node でキャッシュチェック
     const cacheCheck = await this.checkCache(normalizedUrl)
     if (cacheCheck.cached) {
       return cacheCheck.data
@@ -328,8 +391,27 @@ export class MetadataService {
     return preview
   }
   
-  private async checkCache(url: string) {
-    const response = await fetch(`/api/preview/check?url=${encodeURIComponent(url)}`)
+  private async normalizeUrl(url: string) {
+    const response = await fetch(`/api/preview/normalize?url=${encodeURIComponent(url)}`)
+    
+    if (!response.ok) {
+      throw new Error(`URL normalization failed: ${response.statusText}`)
+    }
+    
+    return await response.json()
+  }
+  
+  private async checkCache(normalizedUrl: string) {
+    const response = await fetch('/api/preview/cache-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ normalizedUrl })
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Cache check failed: ${response.statusText}`)
+    }
+    
     return await response.json()
   }
   
@@ -374,44 +456,6 @@ export class MetadataService {
     }
   }
   
-  private normalizeUrl(url: string): string {
-    const urlObj = new URL(url)
-    
-    // 1. ホスト名の小文字化
-    urlObj.hostname = urlObj.hostname.toLowerCase()
-    
-    // 2. デフォルトポート削除
-    if ((urlObj.protocol === 'http:' && urlObj.port === '80') ||
-        (urlObj.protocol === 'https:' && urlObj.port === '443')) {
-      urlObj.port = ''
-    }
-    
-    // 3. フラグメント除去
-    urlObj.hash = ''
-    
-    // 4. トラッキングパラメータ除去
-    const trackingParams = [
-      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-      'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid', 'ref', 'source'
-    ]
-    trackingParams.forEach(param => urlObj.searchParams.delete(param))
-    
-    // 5. クエリキーのソート（残すもの）
-    const sortedParams = new URLSearchParams()
-    Array.from(urlObj.searchParams.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .forEach(([key, value]) => sortedParams.append(key, value))
-    urlObj.search = sortedParams.toString()
-    
-    // 6. 末尾スラッシュ統一（パスがルートでない場合のみ削除）
-    let normalizedUrl = urlObj.toString()
-    if (urlObj.pathname !== '/' && normalizedUrl.endsWith('/')) {
-      normalizedUrl = normalizedUrl.slice(0, -1)
-    }
-    
-    return normalizedUrl
-  }
-  
   private getSiteHandler(url: string): ((url: string, metadata: any) => Promise<any>) | null {
     const urlObj = new URL(url)
     
@@ -440,16 +484,258 @@ export class MetadataService {
 }
 ```
 
+### セキュリティ・フェッチガード関数
+```typescript
+// lib/security/fetch-guard.ts - SSRF対策とセキュアフェッチ
+import { Readable } from 'stream'
+import * as iconv from 'iconv-lite'
+
+// 最大本文サイズ（5MB）
+const MAX_CONTENT_SIZE = 5 * 1024 * 1024
+// 最大リダイレクト回数
+const MAX_REDIRECTS = 5
+
+export async function validateUrlForFetch(url: string): Promise<void> {
+  const urlObj = new URL(url)
+  
+  // 1. プロトコル制限（http/https のみ許可）
+  if (!['http:', 'https:'].includes(urlObj.protocol)) {
+    throw new Error(`Unsupported protocol: ${urlObj.protocol}`)
+  }
+  
+  // 2. プライベートIP帯・localhost ブロック
+  const hostname = urlObj.hostname.toLowerCase()
+  
+  // localhost 系
+  if (['localhost', '127.0.0.1', '::1'].includes(hostname) ||
+      hostname.startsWith('127.') ||
+      hostname.endsWith('.localhost')) {
+    throw new Error('Localhost access denied')
+  }
+  
+  // プライベートIP帯チェック
+  if (isPrivateIP(hostname)) {
+    throw new Error('Private IP access denied')
+  }
+  
+  // 3. 危険なポート番号チェック
+  const dangerousPorts = [22, 23, 25, 53, 135, 139, 445, 993, 995, 1433, 1521, 3306, 3389, 5432, 6379, 27017]
+  const port = parseInt(urlObj.port) || (urlObj.protocol === 'https:' ? 443 : 80)
+  
+  if (dangerousPorts.includes(port)) {
+    throw new Error(`Dangerous port access denied: ${port}`)
+  }
+}
+
+function isPrivateIP(hostname: string): boolean {
+  // IPv4プライベートIP帯の正規表現
+  const privateIPv4Patterns = [
+    /^10\./,                    // 10.0.0.0/8
+    /^172\.(1[6-9]|2[0-9]|3[01])\./, // 172.16.0.0/12
+    /^192\.168\./,              // 192.168.0.0/16
+    /^169\.254\./,              // リンクローカル 169.254.0.0/16
+  ]
+  
+  return privateIPv4Patterns.some(pattern => pattern.test(hostname))
+}
+
+export async function safeFetch(url: string): Promise<string> {
+  let currentUrl = url
+  let redirectCount = 0
+  
+  while (redirectCount <= MAX_REDIRECTS) {
+    const response = await fetch(currentUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'EncoreBot/1.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8', // 日本語サイト対応
+        'Accept-Encoding': 'gzip, deflate',
+        'Cache-Control': 'no-cache'
+      },
+      redirect: 'manual', // 手動でリダイレクト制御
+      signal: AbortSignal.timeout(10000)
+    })
+    
+    // リダイレクト処理
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location')
+      if (!location) {
+        throw new Error('Redirect without location header')
+      }
+      
+      // リダイレクト先URLの検証
+      const redirectUrl = new URL(location, currentUrl).href
+      await validateUrlForFetch(redirectUrl)
+      
+      currentUrl = redirectUrl
+      redirectCount++
+      continue
+    }
+    
+    // HTTPステータスチェック
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    
+    // Content-Type チェック（text/html のみ許可）
+    const contentType = response.headers.get('content-type') || ''
+    if (!contentType.includes('text/html')) {
+      throw new Error(`Invalid content type: ${contentType}. Only text/html is allowed.`)
+    }
+    
+    // Content-Length チェック
+    const contentLength = response.headers.get('content-length')
+    if (contentLength && parseInt(contentLength) > MAX_CONTENT_SIZE) {
+      throw new Error(`Content too large: ${contentLength} bytes (max: ${MAX_CONTENT_SIZE})`)
+    }
+    
+    // エンコーディング検出とストリーミング取得
+    const encoding = detectEncoding(response.headers.get('content-type'))
+    const html = await fetchAndDecode(response, encoding)
+    
+    return html
+  }
+  
+  throw new Error(`Too many redirects: ${redirectCount}`)
+}
+
+function detectEncoding(contentType: string | null): string {
+  if (!contentType) return 'utf-8'
+  
+  // Content-Typeからcharsetを抽出
+  const charsetMatch = contentType.match(/charset=([^;]+)/i)
+  if (charsetMatch) {
+    const charset = charsetMatch[1].trim().toLowerCase()
+    
+    // 日本語エンコーディングの正規化
+    const encodingMap: { [key: string]: string } = {
+      'shift_jis': 'shift_jis',
+      'shift-jis': 'shift_jis', 
+      'sjis': 'shift_jis',
+      'x-sjis': 'shift_jis',
+      'euc-jp': 'euc-jp',
+      'eucjp': 'euc-jp',
+      'iso-2022-jp': 'iso-2022-jp',
+      'utf-8': 'utf-8',
+      'utf8': 'utf-8'
+    }
+    
+    return encodingMap[charset] || 'utf-8'
+  }
+  
+  return 'utf-8'
+}
+
+async function fetchAndDecode(response: Response, encoding: string): Promise<string> {
+  const body = response.body
+  if (!body) {
+    throw new Error('No response body')
+  }
+  
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let totalSize = 0
+  
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      
+      totalSize += value.length
+      if (totalSize > MAX_CONTENT_SIZE) {
+        throw new Error(`Content too large during streaming: ${totalSize} bytes`)
+      }
+      
+      chunks.push(value)
+    }
+    
+    // 全データをBufferに結合
+    const buffer = Buffer.concat(chunks)
+    
+    // エンコーディングに応じてデコード
+    let html: string
+    if (encoding === 'utf-8') {
+      // UTF-8の場合はTextDecoderを使用（高速）
+      html = new TextDecoder('utf-8').decode(buffer)
+    } else {
+      // その他のエンコーディングの場合はiconv-liteを使用
+      if (!iconv.encodingExists(encoding)) {
+        console.warn(`Unsupported encoding: ${encoding}, falling back to utf-8`)
+        html = new TextDecoder('utf-8').decode(buffer)
+      } else {
+        html = iconv.decode(buffer, encoding)
+      }
+    }
+    
+    // HTMLからメタタグのcharsetもチェック（Content-Typeが間違っている場合の補完）
+    const detectedEncoding = detectEncodingFromMeta(html)
+    if (detectedEncoding && detectedEncoding !== encoding) {
+      console.warn(`Content-Type charset (${encoding}) differs from HTML meta charset (${detectedEncoding})`)
+      
+      // 文字化けしている可能性がある場合は再デコード
+      if (isLikelyGarbled(html) && detectedEncoding !== encoding) {
+        try {
+          html = iconv.decode(buffer, detectedEncoding)
+          console.info(`Re-decoded with detected encoding: ${detectedEncoding}`)
+        } catch (error) {
+          console.warn('Re-decoding failed, keeping original:', error)
+        }
+      }
+    }
+    
+    return html
+    
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+function detectEncodingFromMeta(html: string): string | null {
+  // HTMLの先頭部分からmeta charsetを検出
+  const metaCharsetMatch = html.match(/<meta[^>]+charset=["']?([^"'\s>]+)/i)
+  if (metaCharsetMatch) {
+    const charset = metaCharsetMatch[1].toLowerCase()
+    
+    const encodingMap: { [key: string]: string } = {
+      'shift_jis': 'shift_jis',
+      'shift-jis': 'shift_jis',
+      'sjis': 'shift_jis',
+      'euc-jp': 'euc-jp',
+      'iso-2022-jp': 'iso-2022-jp',
+      'utf-8': 'utf-8'
+    }
+    
+    return encodingMap[charset] || null
+  }
+  
+  return null
+}
+
+function isLikelyGarbled(html: string): boolean {
+  // 日本語文字化けの典型的パターンを検出
+  const garbledPatterns = [
+    /[\u00C0-\u00FF]{3,}/, // 連続する拡張ASCII文字（Shift_JIS→UTF-8誤変換）
+    /\ufffd{2,}/,          // 連続する置換文字（？マーク）
+    /縺[縺-繧繝]/,        // Shift_JIS→UTF-8文字化けの典型パターン
+  ]
+  
+  return garbledPatterns.some(pattern => pattern.test(html))
+}
+```
+
 ### 依存関係（package.json）
 ```json
 {
   "dependencies": {
     "cheerio": "^1.0.0-rc.12",
     "@mozilla/readability": "^0.4.4",
-    "jsdom": "^23.0.1"
+    "jsdom": "^23.0.1",
+    "iconv-lite": "^0.6.3"
   },
   "devDependencies": {
-    "@types/jsdom": "^21.1.6"
+    "@types/jsdom": "^21.1.6",
+    "@types/iconv-lite": "^0.0.3"
   }
 }
 ```
@@ -708,31 +994,45 @@ export function makeAbsoluteUrl(href: string, baseUrl: string): string {
 3. 基本URL正規化機能
 4. ブックマーク保存時のメタデータ連携
 
-### Phase 2: パフォーマンス最適化
-5. `/api/preview/check` Edgeルートのキャッシュチェック実装
-6. Readabilityによる本文抜粋強化
-7. 基本キャッシュライフサイクル管理
+### Phase 2: セキュリティ・エンコーディング強化
+5. SSRF対策・フェッチガード実装（`lib/security/fetch-guard.ts`）
+6. プライベートIP・localhost・危険ポートブロック
+7. Content-Type制限・リダイレクト制御・サイズ制限
+8. エンコーディング検出機能（Content-Type charset + HTML meta検出）
+9. 日本語サイト対応（Shift_JIS、EUC-JP対応、文字化け自動修復）
 
-### Phase 3: 堅牢性向上
-8. エラーハンドリング強化
-9. フォールバックメタデータ生成
-10. リトライ機能とタイムアウト調整
+### Phase 3: パフォーマンス最適化  
+10. `/api/preview/normalize` Edgeルート（URL正規化）実装
+11. `/api/preview/cache-check` Nodeルート（キャッシュチェック）実装
+12. Readabilityによる本文抜粋強化
+13. 基本キャッシュライフサイクル管理
 
-### Phase 4: 外部API連携（オプション）
-11. `/api/preview/external`ルート実装
-12. Microlink API連携
-13. 環境変数で有効/無効切り替え
+### Phase 4: 堅牢性向上
+14. エラーハンドリング強化
+15. フォールバックメタデータ生成
+16. リトライ機能とタイムアウト調整
 
-### Phase 5: 運用機能
-14. Vercel Cronでのバックグラウンド再取得
-15. 手動再取得ボタン
-16. 特定サイト専用ハンドラー（Twitter、YouTube等）
-17. 多層レートリミット実装
-18. 指数的バックオフによる失敗リンク管理
+### Phase 5: 外部API連携（オプション）
+17. `/api/preview/external`ルート実装
+18. Microlink API連携
+19. 環境変数で有効/無効切り替え
+
+### Phase 6: 運用機能
+20. Vercel Cronでのバックグラウンド再取得
+21. 手動再取得ボタン
+22. 特定サイト専用ハンドラー（Twitter、YouTube等）
+23. 多層レートリミット実装
+24. 指数的バックオフによる失敗リンク管理
 
 ### 技術的な利点
 - **Vercel完全対応**: HTMLRewriterの制約から解放
-- **依存関係明確**: cheerio, jsdom, readabilityの組み合わせ
+- **依存関係明確**: cheerio, jsdom, readability, iconv-liteの組み合わせ
 - **段階的移行可能**: 将来Edge最適化が必要な場合も分離しやすい構成
+- **セキュリティ強化**: SSRF対策、プライベートIPブロック、サイズ制限等の多層防御
+- **適切な責務分離**: Edge（軽量処理）とNode（DB/複雑処理）の明確な分担
+- **認証セキュリティ**: EdgeでSupabase直参照を避け、RLS制御はNode経由
+- **日本語サイト最適化**: Accept-Language対応による日本語OGP取得安定化
+- **マルチエンコーディング対応**: Shift_JIS、EUC-JP等の日本語サイトでの文字化け回避
+- **インテリジェントデコード**: Content-Type charset検出 + HTML meta補完 + 文字化け自動修復
 - **デバッグ容易**: Node.jsランタイムで完全なログとエラー情報
 - **メンテナンス性**: 一般的なライブラリによる実装で保守が容易

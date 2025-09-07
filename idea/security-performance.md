@@ -571,7 +571,7 @@ GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 
 # メタデータ取得
-METADATA_EXTERNAL_ENABLED=false  # trueで外部API有効
+METADATA_EXTERNAL_ENABLED=false  # 外部API使用制御（true=有効、false=無効）
 MICROLINK_API_KEY=your_microlink_key  # オプション
 
 # 日本語検索設定
