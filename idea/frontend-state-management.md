@@ -77,33 +77,44 @@ export function useBookmarks(filters?: BookmarkFilters) {
     fetchBookmarks()
   }, [filters])
   
-  // Supabase Realtimeでリアルタイム更新
+  // Supabase Realtimeでリアルタイム更新（ユーザースコープ絞り込み）
   useEffect(() => {
-    const channel = supabase
-      .channel('bookmarks-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bookmarks'
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setBookmarks(prev => [payload.new as BookmarkRow, ...prev])
-          } else if (payload.eventType === 'UPDATE') {
-            setBookmarks(prev => prev.map(bookmark => 
-              bookmark.id === payload.new.id ? payload.new as BookmarkRow : bookmark
-            ))
-          } else if (payload.eventType === 'DELETE') {
-            setBookmarks(prev => prev.filter(bookmark => bookmark.id !== payload.old.id))
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const channel = supabase
+        .channel('bookmarks-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'bookmarks',
+            filter: `user_id=eq.${user.id}` // ユーザースコープでフィルタ
+          },
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              setBookmarks(prev => [payload.new as BookmarkRow, ...prev])
+            } else if (payload.eventType === 'UPDATE') {
+              setBookmarks(prev => prev.map(bookmark => 
+                bookmark.id === payload.new.id ? payload.new as BookmarkRow : bookmark
+              ))
+            } else if (payload.eventType === 'DELETE') {
+              setBookmarks(prev => prev.filter(bookmark => bookmark.id !== payload.old.id))
+            }
           }
-        }
-      )
-      .subscribe()
-    
+        )
+        .subscribe()
+      
+      return () => {
+        channel.unsubscribe()
+      }
+    }
+
+    const cleanup = setupRealtime()
     return () => {
-      channel.unsubscribe()
+      cleanup.then(cleanupFn => cleanupFn && cleanupFn())
     }
   }, [])
   
@@ -288,26 +299,37 @@ export function useTags() {
     fetchTags()
   }, [fetchTags])
 
-  // Realtime更新
+  // Realtime更新（ユーザースコープ絞り込み）
   useEffect(() => {
-    const channel = supabase
-      .channel('tags-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'tags'
-        },
-        () => {
-          // タグ更新時は再取得（階層構造のため）
-          fetchTags()
-        }
-      )
-      .subscribe()
+    const setupRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
 
+      const channel = supabase
+        .channel('tags-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'tags',
+            filter: `user_id=eq.${user.id}` // ユーザースコープでフィルタ
+          },
+          () => {
+            // タグ更新時は再取得（階層構造のため）
+            fetchTags()
+          }
+        )
+        .subscribe()
+      
+      return () => {
+        channel.unsubscribe()
+      }
+    }
+
+    const cleanup = setupRealtime()
     return () => {
-      channel.unsubscribe()
+      cleanup.then(cleanupFn => cleanupFn && cleanupFn())
     }
   }, [fetchTags]) // fetchTagsを依存関係に追加
 
