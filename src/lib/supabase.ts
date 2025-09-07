@@ -1,44 +1,92 @@
-import type { Session } from '@supabase/supabase-js'
+import type { AuthChangeEvent, AuthError, Session } from '@supabase/supabase-js'
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables')
+  console.error(
+    'Supabase configuration error: Missing required environment variables',
+  )
+  throw new Error('Application configuration error')
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Google認証の実行
 export const signInWithGoogle = async () => {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-    },
-  })
-  return { data, error }
+  try {
+    // SSR対応: 環境変数またはクライアントサイドで動的取得
+    const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL
+      ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+      : typeof window !== 'undefined'
+        ? `${window.location.origin}/auth/callback`
+        : '/auth/callback'
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl,
+      },
+    })
+
+    if (error) {
+      console.error('Google sign-in error:', error.message)
+    }
+
+    return { data, error }
+  } catch (error) {
+    console.error('Unexpected error during Google sign-in:', error)
+    return {
+      data: null,
+      error: {
+        message: 'Authentication service temporarily unavailable',
+      } as AuthError,
+    }
+  }
 }
 
 // サインアウト
 export const signOut = async () => {
-  const { error } = await supabase.auth.signOut()
-  return { error }
+  try {
+    const { error } = await supabase.auth.signOut()
+
+    if (error) {
+      console.error('Sign-out error:', error.message)
+    }
+
+    return { error }
+  } catch (error) {
+    console.error('Unexpected error during sign-out:', error)
+    return { error: { message: 'Sign-out failed' } as AuthError }
+  }
 }
 
 // 現在のユーザー取得
 export const getCurrentUser = async () => {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-  return { user, error }
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser()
+
+    if (error) {
+      console.error('Get user error:', error.message)
+    }
+
+    return { user, error }
+  } catch (error) {
+    console.error('Unexpected error getting user:', error)
+    return {
+      user: null,
+      error: { message: 'Failed to retrieve user information' } as AuthError,
+    }
+  }
 }
 
 // セッション監視
 export const onAuthStateChange = (
-  callback: (event: string, session: Session | null) => void,
+  callback: (event: AuthChangeEvent, session: Session | null) => void,
 ) => {
   return supabase.auth.onAuthStateChange(callback)
 }

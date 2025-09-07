@@ -41,8 +41,13 @@ on conflict (email) do nothing;
 `.env.local`ファイルに以下の環境変数が設定されていることを確認してください：
 
 ```bash
+# Supabase設定
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+
+# サイトURL（OAuth認証のリダイレクト用）
+NEXT_PUBLIC_SITE_URL=http://localhost:3000  # 開発環境
+# NEXT_PUBLIC_SITE_URL=https://your-domain.com  # 本番環境
 ```
 
 ## データベーススキーマ

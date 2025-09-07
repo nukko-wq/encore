@@ -24,7 +24,7 @@ create policy "read_own_if_allowed" on public.bookmarks
 for select using (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt() ->> 'email'))
+              where ae.email = auth.email())
 );
 
 -- ホワイトリスト＆本人のみ書き込み可能
@@ -32,7 +32,7 @@ create policy "write_own_if_allowed" on public.bookmarks
 for insert with check (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt() ->> 'email'))
+              where ae.email = auth.email())
 );
 
 -- 更新ポリシー（ホワイトリスト＆本人のみ）
@@ -40,7 +40,7 @@ create policy "update_own_if_allowed" on public.bookmarks
 for update using (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt() ->> 'email'))
+              where ae.email = auth.email())
 );
 
 -- 削除ポリシー（ホワイトリスト＆本人のみ）
@@ -48,7 +48,7 @@ create policy "delete_own_if_allowed" on public.bookmarks
 for delete using (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt() ->> 'email'))
+              where ae.email = auth.email())
 );
 
 -- パフォーマンス最適化用インデックス
