@@ -1451,15 +1451,40 @@ export async function safeFetch(url: string, options: RequestInit = {}): Promise
 // app/api/extract/route.ts
 import { Ratelimit } from '@upstash/ratelimit'
 import { Redis } from '@upstash/redis'
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 
-const ratelimit = new Ratelimit({
+// ユーザーベースのレートリミット（認証済みユーザー用）
+const userRateLimit = new Ratelimit({
   redis: Redis.fromEnv(),
-  limiter: Ratelimit.slidingWindow(10, '1 m'), // 1分間1ユーザーに10リクエスト
+  limiter: Ratelimit.slidingWindow(20, '1 m'), // 認証済みユーザー：1分間20リクエスト
+})
+
+// IPベースのレートリミット（未認証・フォールバック用）
+const ipRateLimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(10, '1 m'), // 未認証：1分間10リクエスト
 })
 
 export async function GET(request: Request) {
-  const ip = request.headers.get('x-forwarded-for') ?? '127.0.0.1'
-  const { success } = await ratelimit.limit(ip)
+  // 認証状態をチェック
+  const supabase = createServerComponentClient({ cookies })
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  let identifier: string
+  let rateLimit: Ratelimit
+  
+  if (user) {
+    // 認証済みユーザー：ユーザーIDベースでレートリミット
+    identifier = user.id
+    rateLimit = userRateLimit
+  } else {
+    // 未認証ユーザー：IPベースでレートリミット
+    identifier = request.headers.get('x-forwarded-for') ?? '127.0.0.1'
+    rateLimit = ipRateLimit
+  }
+  
+  const { success } = await rateLimit.limit(identifier)
   
   if (!success) {
     return new Response('Rate limit exceeded', { status: 429 })
@@ -1476,6 +1501,7 @@ export async function GET(request: Request) {
 - **段階的フォールバック**: 必要時のみ高コストAPIを使用
 - **統合キャッシュ**: ユーザー間でキャッシュを共有、重複リクエスト排除
 - **スマート再取得**: 指数的バックオフで失敗リンクの無駄な再試行を抑制
+- **多層レートリミット**: ユーザーID優先、IP フォールバックで安定制御
 
 ## 実装ミニ仕様（コピペ指針）
 
@@ -1527,6 +1553,10 @@ CRON_SECRET=your_random_cron_secret
 # レートリミット（Upstash Redis）
 UPSTASH_REDIS_REST_URL=your_redis_url
 UPSTASH_REDIS_REST_TOKEN=your_redis_token
+
+# レートリミット設定
+RATE_LIMIT_USER_RPM=20      # 認証済みユーザー：1分間のリクエスト数
+RATE_LIMIT_IP_RPM=10        # 未認証ユーザー：1分間のリクエスト数
 ```
 
 ### データ正規化ルール
