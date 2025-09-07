@@ -43,8 +43,11 @@
 #### 0. allowed_emails（ホワイトリスト）
 ```sql
 -- ホワイトリストテーブル（シンプル設計）
+-- citextで大文字小文字を自動無視
+create extension if not exists citext;
+
 create table if not exists public.allowed_emails (
-  email text primary key
+  email citext primary key
 );
 
 -- 初期ホワイトリストの設定例
@@ -135,7 +138,8 @@ create table if not exists public.tags (
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   color text default '#6366f1',
-  parent_tag_id uuid references tags(id),
+  parent_tag_id uuid references tags(id), -- 階層構造（親タグへの参照）
+  display_order integer default 0, -- 同じ階層での並び順制御
   created_at timestamptz default now(),
   unique(user_id, name)
 );
@@ -241,6 +245,7 @@ CREATE INDEX idx_bookmarks_url ON bookmarks(url);
 CREATE UNIQUE INDEX uniq_bookmarks_user_canonical 
   ON bookmarks (user_id, canonical_url);
 CREATE INDEX idx_tags_user_id ON tags(user_id);
+CREATE INDEX idx_tags_parent_order ON tags(user_id, parent_tag_id, display_order); -- 階層表示用
 CREATE INDEX idx_bookmark_tags_bookmark_id ON bookmark_tags(bookmark_id);
 CREATE INDEX idx_bookmark_tags_tag_id ON bookmark_tags(tag_id);
 CREATE INDEX idx_bookmark_metadata_bookmark_id ON bookmark_metadata(bookmark_id);
@@ -363,13 +368,13 @@ export const getCurrentUser = async () => {
   return { user, error }
 }
 
-// ホワイトリストチェック
+// ホワイトリストチェック（citext使用により大文字小文字は自動無視）
 export const checkWhitelistEmail = async (email: string): Promise<boolean> => {
   try {
     const { data, error } = await supabase
       .from('allowed_emails')
       .select('email')
-      .eq('email', email.toLowerCase())
+      .eq('email', email) // citextにより自動で大文字小文字無視
       .single()
     
     return !!data && !error
@@ -385,7 +390,7 @@ export interface Database {
   public: {
     Tables: {
       allowed_emails: {
-        Row: { email: string }
+        Row: { email: string } // citext型だがTypeScriptでは string として扱う
         Insert: { email: string }
         Update: { email?: string }
       }
@@ -395,9 +400,9 @@ export interface Database {
         Update: BookmarkUpdate & { canonical_url?: string }
       }
       tags: {
-        Row: TagRow
-        Insert: TagInsert
-        Update: TagUpdate
+        Row: TagRow & { parent_tag_id?: string; display_order: number }
+        Insert: TagInsert & { parent_tag_id?: string; display_order?: number }
+        Update: TagUpdate & { parent_tag_id?: string; display_order?: number }
       }
       // ... 他のテーブル
     }
@@ -1276,6 +1281,14 @@ export class CacheManager {
 ```
 
 ### バックグラウンド再取得（Vercel Cron）
+
+#### 再取得運用ポリシー
+- **実行頻度**: 1日1回（深夜時間帯）
+- **処理上限**: 1回あたり最大100件のプレビューを処理
+- **対象選定**: 期限切れの成功プレビューを優先、失敗プレビューは指数的バックオフ
+- **バックオフ戦略**: 失敗回数に応じて再試行確率を低下（0.5^retry_count）
+- **レートリミット**: リクエスト間に100ms遅延、外部API負荷を考慮
+
 ```typescript
 // app/api/cron/revalidate/route.ts
 export async function GET(request: Request) {
@@ -1286,37 +1299,63 @@ export async function GET(request: Request) {
   }
   
   try {
-    // 再取得対象を抽出（上位100件）
+    // 再取得対象を優先度順で抽出（上位100件）
+    // 1. 成功プレビューの期限切れ（最優先）
+    // 2. 失敗プレビューの指数的バックオフ対象
     const expiredPreviews = await supabase
       .from('link_previews')
-      .select('url, status, retry_count')
+      .select('url, status, retry_count, fetched_at')
       .lt('revalidate_at', new Date().toISOString())
-      .eq('status', 'success')
-      .order('fetched_at', { ascending: true })
+      .order('status', { ascending: false }) // 'success' > 'partial' > 'failed'
+      .order('fetched_at', { ascending: true }) // 古いものから優先
       .limit(100)
     
     const results = []
     
+    let processedCount = 0
+    let successCount = 0
+    let errorCount = 0
+    
     for (const preview of expiredPreviews.data || []) {
       try {
-        // 指数的バックオフチェック
-        if (preview.status === 'failed' && Math.random() < Math.pow(0.5, preview.retry_count)) {
-          continue
+        // 指数的バックオフチェック（失敗プレビューのみ）
+        if (preview.status === 'failed') {
+          const backoffProbability = Math.pow(0.5, preview.retry_count)
+          if (Math.random() > backoffProbability) {
+            results.push({ url: preview.url, status: 'skipped', reason: 'backoff' })
+            continue
+          }
         }
         
         const updated = await metadataService.extractMetadata(preview.url)
-        results.push({ url: preview.url, status: 'updated' })
+        results.push({ url: preview.url, status: 'updated', source: updated.source })
+        successCount++
         
-        // レートリミットを考慮して遅延
+        // レートリミットを考慮して遅延（外部API保護）
         await new Promise(resolve => setTimeout(resolve, 100))
+        processedCount++
+        
       } catch (error) {
-        results.push({ url: preview.url, status: 'error', error: error.message })
+        results.push({ 
+          url: preview.url, 
+          status: 'error', 
+          error: error.message,
+          retry_count: preview.retry_count + 1
+        })
+        errorCount++
+        processedCount++
       }
     }
     
     return Response.json({ 
       success: true, 
-      processed: results.length,
+      summary: {
+        total_candidates: expiredPreviews.data?.length || 0,
+        processed: processedCount,
+        updated: successCount,
+        errors: errorCount,
+        skipped: results.filter(r => r.status === 'skipped').length
+      },
       results 
     })
   } catch (error) {
@@ -1557,6 +1596,10 @@ UPSTASH_REDIS_REST_TOKEN=your_redis_token
 # レートリミット設定
 RATE_LIMIT_USER_RPM=20      # 認証済みユーザー：1分間のリクエスト数
 RATE_LIMIT_IP_RPM=10        # 未認証ユーザー：1分間のリクエスト数
+
+# Cronジョブ設定
+CRON_REVALIDATE_LIMIT=100   # 1回の実行で処理する最大プレビュー数
+CRON_REQUEST_DELAY=100      # リクエスト間の遅延（ms）
 ```
 
 ### データ正規化ルール
@@ -1606,10 +1649,11 @@ export function makeAbsoluteUrl(href: string, baseUrl: string): string {
 10. 環境変数で有効/無効切り替え
 
 #### Phase 4: 運用機能
-11. Vercel Cronでのバックグラウンド再取得
+11. Vercel Cronでのバックグラウンド再取得（運用ポリシー含む）
 12. 手動再取得ボタン
-13. レートリミット実装
-14. メトリクスとモニタリング
+13. 多層レートリミット実装（ユーザーID + IP）
+14. キャッシュ統計とモニタリング
+15. 指数的バックオフによる失敗リンク管理
 
 ### 日本語検索用ストアドファンクション
 ```sql
