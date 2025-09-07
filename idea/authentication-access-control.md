@@ -6,92 +6,145 @@
 - **個人利用前提**: 自分専用のアプリとして設計
 - **ホワイトリスト制**: 許可されたGoogleアカウントのみアクセス可能
 - **シンプルな構成**: 複雑な権限管理は避け、シンプルに保つ
+- **RLS活用**: SupabaseのRow Level Securityで二重の安全対策
 
-## NextAuth.js v5 認証
+## Supabase Auth 認証
 
-### NextAuth.js v5 設定
+### Supabase Auth 設定
 ```typescript
-// auth.ts
-import NextAuth from "next-auth"
-import Google from "next-auth/providers/google"
-import { SupabaseAdapter } from "@auth/supabase-adapter"
-import { checkWhitelist } from "@/lib/whitelist"
+// lib/supabase.ts
+import { createClient } from '@supabase/supabase-js'
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: SupabaseAdapter({
-    url: process.env.SUPABASE_URL!,
-    secret: process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  }),
-  providers: [
-    Google({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    })
-  ],
-  callbacks: {
-    async signIn({ user, account, profile }) {
-      // ホワイトリストチェック
-      if (!user.email) return false
-      
-      const isWhitelisted = await checkWhitelist(user.email)
-      if (!isWhitelisted) {
-        console.log(`Access denied for email: ${user.email}`)
-        return false
-      }
-      
-      return true
-    },
-    async session({ session, user }) {
-      // セッションにユーザー情報を追加
-      if (session.user) {
-        session.user.id = user.id
-      }
-      return session
-    },
-    async jwt({ token, user, account }) {
-      // JWT トークンにユーザー情報を追加
-      if (user) {
-        token.userId = user.id
-      }
-      return token
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// Google認証の実行
+export const signInWithGoogle = async () => {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${window.location.origin}/auth/callback`
     }
-  },
-  pages: {
-    signIn: '/auth/signin',
-    error: '/auth/error',
-  },
-  session: {
-    strategy: "database",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-  },
-  events: {
-    async signIn({ user, account, profile }) {
-      console.log(`User signed in: ${user.email}`)
-    },
-    async signOut({ session, token }) {
-      console.log(`User signed out`)
+  })
+  return { data, error }
+}
+
+// サインアウト
+export const signOut = async () => {
+  const { error } = await supabase.auth.signOut()
+  return { error }
+}
+
+// 現在のユーザー取得
+export const getCurrentUser = async () => {
+  const { data: { user }, error } = await supabase.auth.getUser()
+  return { user, error }
+}
+
+// セッション監視
+export const onAuthStateChange = (callback: (event: string, session: any) => void) => {
+  return supabase.auth.onAuthStateChange(callback)
+}
+```
+
+### ホワイトリストチェック機能
+```typescript
+// lib/auth-hooks.ts
+import { supabase } from './supabase'
+
+// サインイン後のホワイトリストチェック（Authフック）
+export const setupAuthHook = () => {
+  supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session?.user?.email) {
+      const isAllowed = await checkWhitelistEmail(session.user.email)
+      
+      if (!isAllowed) {
+        console.log(`Access denied for email: ${session.user.email}`)
+        // 即座にサインアウト
+        await supabase.auth.signOut()
+        // エラーページにリダイレクト
+        window.location.href = '/auth/error?message=unauthorized'
+      }
     }
+  })
+}
+
+// ホワイトリストメール確認
+export const checkWhitelistEmail = async (email: string): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from('allowed_emails')
+      .select('email')
+      .eq('email', email.toLowerCase())
+      .single()
+    
+    return !!data && !error
+  } catch (error) {
+    console.error('Whitelist check error:', error)
+    return false
   }
-})
+}
 
-// API Routes用のヘルパー
-// app/api/auth/[...nextauth]/route.ts
-import { handlers } from "@/auth"
-export const { GET, POST } = handlers
+// ホワイトリストにメール追加
+export const addToWhitelist = async (email: string) => {
+  const { data, error } = await supabase
+    .from('allowed_emails')
+    .insert({ email: email.toLowerCase() })
+  
+  return { data, error }
+}
+```
 
-// サーバーサイドでの認証チェック
-export const getServerSession = () => auth()
-
-// クライアントサイド用の認証フック
-import { useSession } from "next-auth/react"
+### React用認証フック
+```typescript
+// hooks/use-auth.ts
+import { useState, useEffect } from 'react'
+import { User } from '@supabase/supabase-js'
+import { supabase, signInWithGoogle, signOut as supabaseSignOut } from '@/lib/supabase'
 
 export function useAuth() {
-  const { data: session, status } = useSession()
-  
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // 初回セッション確認
+    const getInitialSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setUser(session?.user ?? null)
+      setLoading(false)
+    }
+
+    getInitialSession()
+
+    // 認証状態変更の監視
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        setUser(session?.user ?? null)
+        setLoading(false)
+      }
+    )
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const signIn = async () => {
+    const { data, error } = await signInWithGoogle()
+    return { data, error }
+  }
+
+  const signOutUser = async () => {
+    const { error } = await supabaseSignOut()
+    return { error }
+  }
+
   return {
-    user: session?.user,
-    loading: status === "loading",
-    authenticated: !!session
+    user,
+    loading,
+    authenticated: !!user,
+    signIn,
+    signOut: signOutUser
   }
 }
 ```
@@ -101,27 +154,26 @@ export function useAuth() {
 sequenceDiagram
     participant U as User
     participant A as App
-    participant N as NextAuth.js
+    participant SA as Supabase Auth
     participant G as Google
-    participant S as Supabase
+    participant DB as Supabase DB
 
     U->>A: アクセス
-    A->>N: セッション確認
+    A->>SA: セッション確認
     alt 未認証の場合
         A->>U: ログインページ表示
         U->>A: Googleログインボタンクリック
-        A->>N: signIn() 呼び出し
-        N->>G: OAuth認証開始
+        A->>SA: signInWithOAuth('google')
+        SA->>G: OAuth認証開始
         G->>U: Google認証画面
         U->>G: 認証情報入力
-        G->>N: 認証コールバック
-        N->>N: ホワイトリストチェック
+        G->>SA: 認証コールバック
+        SA->>A: 認証状態変更通知(SIGNED_IN)
+        A->>DB: ホワイトリストチェック(allowed_emails)
         alt ホワイトリストに含まれる場合
-            N->>S: ユーザー情報保存
-            N->>A: セッション作成
             A->>U: ダッシュボード画面
         else ホワイトリストに含まれない場合
-            N->>A: エラーページリダイレクト
+            A->>SA: signOut()
             A->>U: アクセス拒否画面
         end
     else 認証済みの場合
@@ -133,32 +185,30 @@ sequenceDiagram
 
 ### データベース設計
 ```sql
--- ホワイトリストテーブル
-CREATE TABLE whitelist_emails (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  email text UNIQUE NOT NULL,
-  added_at timestamp with time zone DEFAULT now(),
-  added_by uuid REFERENCES users(id),
-  is_active boolean DEFAULT true,
-  notes text
+-- ホワイトリストテーブル（シンプル設計）
+create table if not exists public.allowed_emails (
+  email text primary key
 );
 
--- ユーザーテーブルにホワイトリストフラグ追加
-ALTER TABLE users ADD COLUMN is_whitelisted boolean DEFAULT false;
+-- 初期ホワイトリストの設定例
+insert into public.allowed_emails (email) values 
+  ('your-email@gmail.com'),
+  ('another-email@gmail.com')
+on conflict (email) do nothing;
 ```
 
-### ホワイトリストチェック機能
+### ホワイトリスト管理機能
 ```typescript
 // lib/whitelist.ts
 import { supabase } from './supabase'
 
-export async function checkWhitelist(email: string): Promise<boolean> {
+// ホワイトリストメール確認
+export async function checkWhitelistEmail(email: string): Promise<boolean> {
   try {
     const { data, error } = await supabase
-      .from('whitelist_emails')
+      .from('allowed_emails')
       .select('email')
       .eq('email', email.toLowerCase())
-      .eq('is_active', true)
       .single()
     
     return !!data && !error
@@ -168,146 +218,222 @@ export async function checkWhitelist(email: string): Promise<boolean> {
   }
 }
 
-export async function addToWhitelist(email: string, addedBy: string, notes?: string) {
+// ホワイトリストにメール追加
+export async function addToWhitelist(email: string) {
   const { data, error } = await supabase
-    .from('whitelist_emails')
-    .insert({
-      email: email.toLowerCase(),
-      added_by: addedBy,
-      notes
-    })
+    .from('allowed_emails')
+    .insert({ email: email.toLowerCase() })
   
   return { data, error }
 }
 
+// ホワイトリスト一覧取得
 export async function getWhitelistEmails() {
   const { data, error } = await supabase
-    .from('whitelist_emails')
+    .from('allowed_emails')
     .select('*')
-    .eq('is_active', true)
-    .order('added_at', { ascending: false })
+    .order('email')
   
   return { data, error }
 }
 
-// 初期ホワイトリストの設定（環境変数から）
-export async function initializeWhitelist() {
-  const initialEmails = process.env.INITIAL_WHITELIST_EMAILS?.split(',') || []
+// ホワイトリストからメール削除
+export async function removeFromWhitelist(email: string) {
+  const { error } = await supabase
+    .from('allowed_emails')
+    .delete()
+    .eq('email', email.toLowerCase())
   
-  for (const email of initialEmails) {
-    const trimmedEmail = email.trim().toLowerCase()
-    if (trimmedEmail) {
-      // 既存チェック
-      const { data: existing } = await supabase
-        .from('whitelist_emails')
-        .select('email')
-        .eq('email', trimmedEmail)
-        .single()
-      
-      if (!existing) {
-        await addToWhitelist(trimmedEmail, 'system', 'Initial setup')
-      }
-    }
-  }
+  return { error }
 }
 ```
 
 ## アクセス制御 (Row Level Security)
 
-### Supabase RLS ポリシー
+### Supabase RLS ポリシー（ホワイトリスト統合）
 
-#### users テーブル
+#### bookmarks テーブル（主要例）
 ```sql
--- ユーザーは自分の情報のみ参照・更新可能
-CREATE POLICY "Users can view own profile" ON users
-  FOR SELECT USING (auth.uid() = id);
+-- ブックマークテーブル作成
+create table if not exists public.bookmarks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  url text not null,
+  title text,
+  description text,
+  thumbnail_url text,
+  memo text,
+  is_favorite boolean default false,
+  is_pinned boolean default false,
+  status text check (status in ('unread','read')) default 'unread',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
 
-CREATE POLICY "Users can update own profile" ON users
-  FOR UPDATE USING (auth.uid() = id);
-```
+-- RLS有効化
+alter table public.bookmarks enable row level security;
 
-#### bookmarks テーブル
-```sql
--- ユーザーは自分のブックマークのみアクセス可能
-CREATE POLICY "Users can view own bookmarks" ON bookmarks
-  FOR SELECT USING (auth.uid() = user_id);
+-- 読み取りポリシー（ホワイトリスト＆本人のみ）
+create policy "read_own_if_allowed" on public.bookmarks
+for select using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
 
-CREATE POLICY "Users can insert own bookmarks" ON bookmarks
-  FOR INSERT WITH CHECK (auth.uid() = user_id);
+-- 書き込みポリシー（ホワイトリスト＆本人のみ）
+create policy "write_own_if_allowed" on public.bookmarks
+for insert with check (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
 
-CREATE POLICY "Users can update own bookmarks" ON bookmarks
-  FOR UPDATE USING (auth.uid() = user_id);
+-- 更新ポリシー
+create policy "update_own_if_allowed" on public.bookmarks
+for update using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
 
-CREATE POLICY "Users can delete own bookmarks" ON bookmarks
-  FOR DELETE USING (auth.uid() = user_id);
+-- 削除ポリシー
+create policy "delete_own_if_allowed" on public.bookmarks
+for delete using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
 ```
 
 #### tags テーブル
 ```sql
--- ユーザーは自分のタグのみアクセス可能
-CREATE POLICY "Users can manage own tags" ON tags
-  FOR ALL USING (auth.uid() = user_id);
+-- タグテーブル作成
+create table if not exists public.tags (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  color text default '#6366f1',
+  created_at timestamptz default now(),
+  unique(user_id, name)
+);
+
+alter table public.tags enable row level security;
+
+-- タグ管理ポリシー
+create policy "manage_own_tags_if_allowed" on public.tags
+for all using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
 ```
 
 #### bookmark_tags テーブル
 ```sql
--- ブックマークの所有者のみタグ操作可能
-CREATE POLICY "Users can manage own bookmark tags" ON bookmark_tags
-  FOR ALL USING (
-    EXISTS (
-      SELECT 1 FROM bookmarks 
-      WHERE bookmarks.id = bookmark_tags.bookmark_id 
-      AND bookmarks.user_id = auth.uid()
-    )
-  );
+-- ブックマークタグ関連テーブル
+create table if not exists public.bookmark_tags (
+  id uuid primary key default gen_random_uuid(),
+  bookmark_id uuid not null references public.bookmarks(id) on delete cascade,
+  tag_id uuid not null references public.tags(id) on delete cascade,
+  created_at timestamptz default now(),
+  unique(bookmark_id, tag_id)
+);
+
+alter table public.bookmark_tags enable row level security;
+
+-- ブックマークの所有者かつホワイトリストユーザーのみタグ操作可能
+create policy "manage_bookmark_tags_if_allowed" on public.bookmark_tags
+for all using (
+  exists (
+    select 1 from public.bookmarks b
+    where b.id = bookmark_tags.bookmark_id 
+    and b.user_id = auth.uid()
+    and exists (select 1 from public.allowed_emails ae
+                where ae.email = (auth.jwt()->>'email'))
+  )
+);
 ```
 
 ## ミドルウェア・認証ガード
 
-### Next.js Middleware (NextAuth.js v5)
+### Next.js Middleware (Supabase Auth)
 ```typescript
 // middleware.ts
-import { auth } from "@/auth"
-import { NextResponse } from "next/server"
-import type { NextRequest } from "next/server"
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-export default auth((req) => {
-  const { nextUrl } = req
-  const session = req.auth
-
-  // 認証が必要なルートの保護
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+  
+  // 認証が必要なルートの定義
   const protectedRoutes = ['/dashboard', '/bookmarks', '/tags', '/settings']
-  const isProtectedRoute = protectedRoutes.some(route => 
-    nextUrl.pathname.startsWith(route)
-  )
+  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route))
+  const isApiRoute = pathname.startsWith('/api/') && !pathname.startsWith('/api/auth/')
+  
+  if (isProtectedRoute || isApiRoute) {
+    let response = NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    })
 
-  if (isProtectedRoute) {
-    if (!session) {
-      return NextResponse.redirect(new URL('/auth/signin', req.url))
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            request.cookies.set({ name, value, ...options })
+            response = NextResponse.next({
+              request: {
+                headers: request.headers,
+              },
+            })
+            response.cookies.set({ name, value, ...options })
+          },
+          remove(name: string, options: CookieOptions) {
+            request.cookies.set({ name, value: '', ...options })
+            response = NextResponse.next({
+              request: {
+                headers: request.headers,
+              },
+            })
+            response.cookies.set({ name, value: '', ...options })
+          },
+        },
+      }
+    )
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    // 認証が必要なルートでユーザーがいない場合
+    if (!user) {
+      if (isApiRoute) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      } else {
+        return NextResponse.redirect(new URL('/auth/signin', request.url))
+      }
     }
 
-    // ホワイトリストは NextAuth.js の signIn callback で既にチェック済み
-    // セッションが存在する = ホワイトリストを通過済み
-  }
+    // ホワイトリストチェックはクライアントサイドで実施
+    // あるいはRLSポリシーでチェックされる
 
-  // API ルートの保護
-  if (nextUrl.pathname.startsWith('/api/') && 
-      !nextUrl.pathname.startsWith('/api/auth/')) {
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
+    return response
   }
 
   return NextResponse.next()
-})
+}
 
 export const config = {
   matcher: [
     '/dashboard/:path*',
-    '/bookmarks/:path*',
+    '/bookmarks/:path*', 
     '/tags/:path*',
     '/settings/:path*',
     '/api/:path*'
@@ -315,115 +441,184 @@ export const config = {
 }
 ```
 
-### React Hook (認証状態管理) - 更新済み
+### サーバーコンポーネント用認証ヘルパー
 ```typescript
-// hooks/use-auth.ts - NextAuth.js v5対応
-import { useSession, signIn, signOut } from "next-auth/react"
+// lib/auth-server.ts
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 
-export function useAuth() {
-  const { data: session, status } = useSession()
+export async function createServerSupabaseClient() {
+  const cookieStore = cookies()
 
-  return {
-    user: session?.user,
-    userId: session?.user?.id,
-    loading: status === "loading",
-    authenticated: !!session,
-    signIn: () => signIn('google'),
-    signOut: () => signOut()
-  }
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options })
+          } catch (error) {
+            // サーバーコンポーネント内ではcookieを設定できない場合がある
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: '', ...options })
+          } catch (error) {
+            // サーバーコンポーネント内ではcookieを削除できない場合がある
+          }
+        },
+      },
+    }
+  )
 }
 
-// サーバーコンポーネント用のヘルパー
-// lib/auth-server.ts
-import { auth } from "@/auth"
-import { redirect } from "next/navigation"
-
+// 認証必須のサーバーコンポーネント用
 export async function requireAuth() {
-  const session = await auth()
+  const supabase = await createServerSupabaseClient()
+  const { data: { user }, error } = await supabase.auth.getUser()
   
-  if (!session) {
+  if (!user || error) {
     redirect('/auth/signin')
   }
   
-  return session
+  return { user, supabase }
 }
 
+// 現在のユーザー取得
 export async function getCurrentUser() {
-  const session = await auth()
-  return session?.user || null
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return user
 }
 
 // API Route用の認証チェック
-// lib/auth-api.ts
-import { auth } from "@/auth"
-import { NextRequest } from "next/server"
-
-export async function validateApiAuth(request: NextRequest) {
-  const session = await auth()
+export async function validateApiAuth() {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user }, error } = await supabase.auth.getUser()
   
-  if (!session) {
-    return Response.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    )
+  if (!user || error) {
+    return { user: null, error: 'Unauthorized' }
   }
   
-  return { session, user: session.user }
+  return { user, error: null }
 }
 ```
 
 ## セッション管理
 
-### NextAuth.js v5 セッション設定
+### Supabase Auth セッション設定
 ```typescript
-// NextAuth.js の設定 (auth.ts より抜粋)
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  session: {
-    strategy: "database", // Supabaseにセッション情報を保存
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-    updateAge: 24 * 60 * 60, // 24 hours
-  },
-  // その他の設定...
-})
-
-// クライアントサイドでのセッションプロバイダー
-// app/layout.tsx
-import { SessionProvider } from "next-auth/react"
+// app/layout.tsx - クライアントサイドでの認証プロバイダー
+import { AuthProvider } from '@/components/auth-provider'
 
 export default function RootLayout({
   children,
-  session
 }: {
   children: React.ReactNode
-  session: any
 }) {
   return (
     <html>
       <body>
-        <SessionProvider session={session}>
+        <AuthProvider>
           {children}
-        </SessionProvider>
+        </AuthProvider>
       </body>
     </html>
   )
 }
+```
 
-// 環境変数設定例
-// .env.local
-NEXTAUTH_SECRET=your-secret-key-here
-NEXTAUTH_URL=http://localhost:3000
-GOOGLE_CLIENT_ID=your-google-client-id
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-SUPABASE_URL=your-supabase-url
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-INITIAL_WHITELIST_EMAILS=your-email@gmail.com,another@gmail.com
+```typescript
+// components/auth-provider.tsx
+'use client'
+import { createContext, useContext, useEffect, useState } from 'react'
+import { User } from '@supabase/supabase-js'
+import { supabase, checkWhitelistEmail } from '@/lib/supabase'
+
+type AuthContextType = {
+  user: User | null
+  loading: boolean
+}
+
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  loading: true
+})
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // 初回セッション取得
+    const getInitialSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setUser(session?.user ?? null)
+      setLoading(false)
+    }
+
+    getInitialSession()
+
+    // 認証状態変更の監視＆ホワイトリストチェック
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_IN' && session?.user?.email) {
+          const isAllowed = await checkWhitelistEmail(session.user.email)
+          
+          if (!isAllowed) {
+            console.log(`Access denied for email: ${session.user.email}`)
+            await supabase.auth.signOut()
+            window.location.href = '/auth/error?message=unauthorized'
+            return
+          }
+        }
+        
+        setUser(session?.user ?? null)
+        setLoading(false)
+      }
+    )
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  return (
+    <AuthContext.Provider value={{ user, loading }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export const useAuth = () => {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider')
+  }
+  return context
+}
+```
+
+### 環境変数設定
+```bash
+# .env.local
+# Supabase設定
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+
+# Google OAuth設定（Supabaseダッシュボードで設定）
+# GOOGLE_CLIENT_IDとGOOGLE_CLIENT_SECRETはSupabaseダッシュボードで設定
 ```
 
 ### セッション有効期限・設定
-- **セッション期間**: 30日（自動延長）
-- **更新間隔**: 24時間毎
-- **セッション保存**: Supabase Database
-- **自動ログアウト**: セッション期限切れ時
+- **セッション期間**: Supabaseのデフォルト設定（アクセストークン: 1時間、リフレッシュトークン: 24時間）
+- **自動リフトレッシュ**: Supabaseが自動でトークン更新
+- **セッション保存**: ブラウザのHTTPOnly Cookie
+- **自動ログアウト**: リフレッシュトークン期限切れ時
 
 ## セキュリティ考慮事項
 
@@ -461,7 +656,7 @@ const nextConfig: NextConfig = {
           },
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'"
+            value: "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; connect-src 'self' https://*.supabase.co"
           }
         ]
       }
@@ -470,70 +665,159 @@ const nextConfig: NextConfig = {
 }
 ```
 
+### クライアントサイドでのデータ操作例
+```typescript
+// データベース操作の例
+import { supabase } from '@/lib/supabase'
+
+// ブックマーク作成（RLSポリシーで自動的にホワイトリスト＆所有者チェック）
+export async function createBookmark(url: string, title: string) {
+  const { data: { user } } = await supabase.auth.getUser()
+  
+  if (!user) {
+    throw new Error('User not authenticated')
+  }
+  
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .insert({
+      user_id: user.id,
+      url,
+      title
+    })
+    .select()
+    .single()
+  
+  if (error) {
+    // RLSポリシーでブロックされた場合もここでエラーになる
+    throw new Error(error.message)
+  }
+  
+  return data
+}
+
+// ブックマーク一覧取得（RLSポリシーで自動フィルタ）
+export async function getBookmarks() {
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .select('*')
+    .order('created_at', { ascending: false })
+  
+  if (error) {
+    throw new Error(error.message)
+  }
+  
+  return data
+}
+```
+
 ## Chrome拡張機能の認証
 
 ### 拡張機能とWebアプリの連携
 ```typescript
-// Chrome拡張機能側
-// popup.js
+// Chrome拡張機能側 - popup.js
 chrome.tabs.query({active: true, currentWindow: true}, async (tabs) => {
-  // NextAuth.js セッショントークンを取得
-  const sessionToken = await chrome.storage.local.get(['nextauth.session-token'])
-  
-  const response = await fetch('https://your-app.vercel.app/api/bookmarks', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Cookie': `next-auth.session-token=${sessionToken['nextauth.session-token']}`
-    },
-    body: JSON.stringify({
-      url: tabs[0].url,
-      title: tabs[0].title
+  try {
+    // Supabaseセッショントークンを取得
+    const cookies = await chrome.cookies.getAll({
+      domain: 'your-encore-app.vercel.app'
     })
-  })
+    
+    const authCookies = cookies.filter(cookie => 
+      cookie.name.startsWith('sb-') // Supabaseのcookieプレフィックス
+    )
+    
+    const cookieHeader = authCookies
+      .map(cookie => `${cookie.name}=${cookie.value}`)
+      .join('; ')
+    
+    const response = await fetch('https://your-encore-app.vercel.app/api/bookmarks', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': cookieHeader
+      },
+      body: JSON.stringify({
+        url: tabs[0].url,
+        title: tabs[0].title
+      })
+    })
+    
+    if (response.ok) {
+      // 保存成功の通知
+      chrome.action.setBadgeText({ text: '✓' })
+      setTimeout(() => {
+        chrome.action.setBadgeText({ text: '' })
+      }, 2000)
+    }
+  } catch (error) {
+    console.error('Bookmark save failed:', error)
+    chrome.action.setBadgeText({ text: '!' })
+  }
 })
+```
 
-// Web アプリ側: 拡張機能用のAPI
-// app/api/extension/bookmark/route.ts
-import { auth } from "@/auth"
-import { NextRequest } from "next/server"
+```typescript
+// Webアプリ側: 拡張機能用API
+// app/api/bookmarks/route.ts
+import { createServerSupabaseClient } from '@/lib/auth-server'
+import { NextRequest } from 'next/server'
 
 export async function POST(request: NextRequest) {
-  const session = await auth()
+  const supabase = await createServerSupabaseClient()
+  const { data: { user }, error } = await supabase.auth.getUser()
   
-  if (!session) {
-    return Response.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    )
+  if (!user || error) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
   
   const { url, title } = await request.json()
   
-  // ブックマーク保存処理
-  // ...
+  // ホワイトリストチェックはRLSポリシーで自動でチェックされる
+  const { data, error: insertError } = await supabase
+    .from('bookmarks')
+    .insert({
+      user_id: user.id,
+      url,
+      title
+    })
+    .select()
+    .single()
   
-  return Response.json({ success: true })
+  if (insertError) {
+    return Response.json({ error: insertError.message }, { status: 400 })
+  }
+  
+  return Response.json({ success: true, data })
 }
 ```
 
-### 拡張機能認証フロー (NextAuth.js v5)
-1. Web アプリでNextAuth.js経由でログイン
-2. セッション情報がSupabaseに保存される
-3. 拡張機能がWebアプリのCookieを共有
-4. API呼び出し時にセッションCookieを使用
-5. NextAuth.jsがセッションを検証
+### 拡張機能認証フロー (Supabase Auth)
+1. WebアプリでSupabase Auth経由でGoogleログイン
+2. SupabaseがHTTPOnly Cookieでセッション管理
+3. Chrome拡張機能がドメインのCookieを取得
+4. API呼び出し時にCookieヘッダーで送信
+5. Supabaseがセッションを検証＆RLSポリシーでアクセス制御
 
 ### 拡張機能の権限設定
 ```json
 // manifest.json
 {
+  "manifest_version": 3,
+  "name": "Encore - Read Later",
+  "version": "1.0.0",
   "host_permissions": [
     "https://your-encore-app.vercel.app/*"
   ],
   "permissions": [
-    "storage",
+    "activeTab",
     "cookies"
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
 }
 ```

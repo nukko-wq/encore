@@ -17,15 +17,16 @@
 - [x] プロジェクトセットアップ（Next.js + TypeScript + Tailwind）
 - [ ] Supabase プロジェクトセットアップ
 - [ ] データベーススキーマ作成（users, bookmarks, whitelist_emails）
-- [ ] NextAuth.js v5 + Google Provider 実装
-- [ ] Supabase Adapter 設定
+- [ ] Supabase Auth + Google Provider 実装
+- [ ] ホワイトリストテーブル(allowed_emails)作成
+- [ ] RLSポリシー設定
 - [ ] ホワイトリスト機能実装
 - [ ] 基本的なUI/UXコンポーネント作成
 
 #### 成果物
-- NextAuth.js v5 + Google認証機能付きの基本アプリケーション
-- Supabase データベース基盤（NextAuth.js Adapter連携）
-- ホワイトリストベースのアクセス制御
+- Supabase Auth + Google認証機能付きの基本アプリケーション
+- Supabase データベース基盤（RLSポリシー連携）
+- ホワイトリストベースのアクセス制御（二重チェック）
 - 基本UI コンポーネントライブラリ
 
 ### Week 3-4: コア機能開発
@@ -182,9 +183,9 @@
 ## 各フェーズの判定基準
 
 ### Phase 1 完了条件
-- [ ] NextAuth.js v5 + Google認証でログインできる
-- [ ] ホワイトリストによるアクセス制御が動作
-- [ ] セッション管理がSupabase Adapterで正常動作
+- [ ] Supabase Auth + Google認証でログインできる
+- [ ] ホワイトリストによるアクセス制御が動作（Authフック + RLS）
+- [ ] セッション管理がSupabase Authで正常動作
 - [ ] URL保存・表示・削除ができる
 - [ ] Phase 1+2 メタデータ取得が安定動作（自前実装+フォールバック）
 - [ ] モバイルで基本操作ができる
@@ -220,7 +221,7 @@
 ### 技術的リスク
 | リスク | 影響度 | 対策 |
 |--------|--------|------|
-| NextAuth.js v5 学習コスト | 中 | 公式ドキュメント・コミュニティ活用 |
+| Supabase AuthのRLS設定学習コスト | 低 | 公式ドキュメントでベストプラクティスを参照 |
 | Twitter API制限 | 低 | URL解析ベースで基本機能提供、APIは将来オプション |
 | Supabase制限 | 高 | 使用量監視、必要に応じて有料プラン |
 | パフォーマンス劣化 | 中 | 段階的最適化、監視体制 |

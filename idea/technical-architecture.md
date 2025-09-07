@@ -22,13 +22,13 @@
             ┌──────────────────────┼──────────────────────┐
             │                      │                      │
     ┌───────────────┐    ┌─────────────────┐    ┌─────────────────┐
-    │ NextAuth.js v5│    │ Supabase DB     │    │ Supabase Storage│
-    │ (認証・セッション)│    │ (PostgreSQL)    │    │  (画像・動画)   │
+    │  Supabase Auth  │    │ Supabase DB     │    │ Supabase Storage│
+    │ (Google OAuth)  │    │ (PostgreSQL+RLS)│    │  (画像・動画)   │
     └───────────────┘    └─────────────────┘    └─────────────────┘
                                    │
                          ┌─────────────────┐
                          │  External APIs  │
-                         │ - Google OAuth  │
+                         │ - Supabase Auth │
                          │ - Microlink API*│
                          │   (Fallback)    │
                          │ - Twitter API*  │
@@ -40,59 +40,138 @@
 
 ### テーブル設計
 
-#### 1. users（ユーザー）
+#### 0. allowed_emails（ホワイトリスト）
 ```sql
-CREATE TABLE users (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  email text UNIQUE NOT NULL,
+-- ホワイトリストテーブル（シンプル設計）
+create table if not exists public.allowed_emails (
+  email text primary key
+);
+
+-- 初期ホワイトリストの設定例
+insert into public.allowed_emails (email) values 
+  ('your-email@gmail.com'),
+  ('another-email@gmail.com')
+on conflict (email) do nothing;
+```
+
+#### 1. users（ユーザー - Supabase Auth自動管理）
+```sql
+-- Supabase Authが自動で管理するauth.usersテーブルを利用
+-- 追加のユーザー情報が必要な場合は以下のように拡張
+CREATE TABLE public.user_profiles (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   display_name text,
   avatar_url text,
   created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  is_whitelisted boolean DEFAULT false
+  updated_at timestamp with time zone DEFAULT now()
 );
+
+-- RLS有効化
+ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+
+-- ユーザーは自分のプロフィールのみアクセス可能
+CREATE POLICY "Users can manage own profile" ON public.user_profiles
+  FOR ALL USING (auth.uid() = id);
 ```
 
 #### 2. bookmarks（ブックマーク）
 ```sql
-CREATE TABLE bookmarks (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
-  url text NOT NULL,
+create table if not exists public.bookmarks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  url text not null,
   title text,
   description text,
   thumbnail_url text,
   memo text,
-  is_favorite boolean DEFAULT false,
-  is_pinned boolean DEFAULT false,
-  is_read boolean DEFAULT false,
-  pinned_at timestamp with time zone,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now()
+  is_favorite boolean default false,
+  is_pinned boolean default false,
+  status text check (status in ('unread','read')) default 'unread',
+  pinned_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- RLS有効化
+alter table public.bookmarks enable row level security;
+
+-- ホワイトリスト＆本人のみ読み取り可能
+create policy "read_own_if_allowed" on public.bookmarks
+for select using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
+
+-- ホワイトリスト＆本人のみ書き込み可能
+create policy "write_own_if_allowed" on public.bookmarks
+for insert with check (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
+
+-- 更新・削除ポリシー
+create policy "update_own_if_allowed" on public.bookmarks
+for update using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
+);
+
+create policy "delete_own_if_allowed" on public.bookmarks
+for delete using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
 );
 ```
 
 #### 3. tags（タグ）
 ```sql
-CREATE TABLE tags (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES users(id) ON DELETE CASCADE,
-  name text NOT NULL,
-  color text DEFAULT '#6366f1',
-  parent_tag_id uuid REFERENCES tags(id),
-  created_at timestamp with time zone DEFAULT now(),
-  UNIQUE(user_id, name)
+create table if not exists public.tags (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  color text default '#6366f1',
+  parent_tag_id uuid references tags(id),
+  created_at timestamptz default now(),
+  unique(user_id, name)
+);
+
+alter table public.tags enable row level security;
+
+-- ホワイトリスト＆本人のみタグ管理可能
+create policy "manage_own_tags_if_allowed" on public.tags
+for all using (
+  user_id = auth.uid()
+  and exists (select 1 from public.allowed_emails ae
+              where ae.email = (auth.jwt()->>'email'))
 );
 ```
 
 #### 4. bookmark_tags（ブックマークタグ関連）
 ```sql
-CREATE TABLE bookmark_tags (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  bookmark_id uuid REFERENCES bookmarks(id) ON DELETE CASCADE,
-  tag_id uuid REFERENCES tags(id) ON DELETE CASCADE,
-  created_at timestamp with time zone DEFAULT now(),
-  UNIQUE(bookmark_id, tag_id)
+create table if not exists public.bookmark_tags (
+  id uuid primary key default gen_random_uuid(),
+  bookmark_id uuid not null references public.bookmarks(id) on delete cascade,
+  tag_id uuid not null references public.tags(id) on delete cascade,
+  created_at timestamptz default now(),
+  unique(bookmark_id, tag_id)
+);
+
+alter table public.bookmark_tags enable row level security;
+
+-- ブックマーク所有者かつホワイトリストユーザーのみタグ操作可能
+create policy "manage_bookmark_tags_if_allowed" on public.bookmark_tags
+for all using (
+  exists (
+    select 1 from public.bookmarks b
+    where b.id = bookmark_tags.bookmark_id 
+    and b.user_id = auth.uid()
+    and exists (select 1 from public.allowed_emails ae
+                where ae.email = (auth.jwt()->>'email'))
+  )
 );
 ```
 
@@ -224,59 +303,76 @@ CREATE INDEX idx_bookmarks_search ON bookmarks USING gin(
 
 ### データベース・API層
 
-#### NextAuth.js v5 設定
+#### Supabase Auth 設定
 ```typescript
-// auth.ts
-import NextAuth from "next-auth"
-import Google from "next-auth/providers/google"
-import { SupabaseAdapter } from "@auth/supabase-adapter"
-
-export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: SupabaseAdapter({
-    url: process.env.SUPABASE_URL!,
-    secret: process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  }),
-  providers: [
-    Google({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    })
-  ],
-  callbacks: {
-    async signIn({ user, account, profile }) {
-      // ホワイトリストチェック
-      const isWhitelisted = await checkWhitelist(user.email!)
-      return isWhitelisted
-    },
-    async session({ session, user }) {
-      // セッションにユーザー情報を追加
-      session.user.id = user.id
-      return session
-    }
-  },
-  pages: {
-    signIn: '/auth/signin',
-    error: '/auth/error',
-  }
-})
-
-// Supabase クライアント設定
 // lib/supabase.ts
 import { createClient } from '@supabase/supabase-js'
+import type { Database } from '@/types/database'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// 型安全なSupabaseクライアント
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
+
+// Google認証の実行
+export const signInWithGoogle = async () => {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${window.location.origin}/auth/callback`
+    }
+  })
+  return { data, error }
+}
+
+// サインアウト
+export const signOut = async () => {
+  const { error } = await supabase.auth.signOut()
+  return { error }
+}
+
+// 現在のユーザー取得
+export const getCurrentUser = async () => {
+  const { data: { user }, error } = await supabase.auth.getUser()
+  return { user, error }
+}
+
+// ホワイトリストチェック
+export const checkWhitelistEmail = async (email: string): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from('allowed_emails')
+      .select('email')
+      .eq('email', email.toLowerCase())
+      .single()
+    
+    return !!data && !error
+  } catch (error) {
+    console.error('Whitelist check error:', error)
+    return false
+  }
+}
 
 // 型安全性のためのDB型定義
+// types/database.ts
 export interface Database {
   public: {
     Tables: {
+      allowed_emails: {
+        Row: { email: string }
+        Insert: { email: string }
+        Update: { email?: string }
+      }
       bookmarks: {
         Row: BookmarkRow
         Insert: BookmarkInsert
         Update: BookmarkUpdate
+      }
+      tags: {
+        Row: TagRow
+        Insert: TagInsert
+        Update: TagUpdate
       }
       // ... 他のテーブル
     }
@@ -284,25 +380,106 @@ export interface Database {
 }
 ```
 
-#### データアクセスレイヤー
+#### データアクセスレイヤー（Supabase RLS活用）
 ```typescript
 // lib/services/bookmarks.ts
+import { supabase } from '@/lib/supabase'
+import type { Database } from '@/types/database'
+
+type BookmarkRow = Database['public']['Tables']['bookmarks']['Row']
+type BookmarkInsert = Database['public']['Tables']['bookmarks']['Insert']
+
 export class BookmarkService {
-  async getBookmarks(userId: string, filters: BookmarkFilters) {
-    // Supabase クエリ実装
+  // RLSポリシーにより自動でユーザーのデータのみ取得
+  async getBookmarks(filters?: BookmarkFilters): Promise<BookmarkRow[]> {
+    let query = supabase
+      .from('bookmarks')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (filters?.status) {
+      query = query.eq('status', filters.status)
+    }
+    
+    if (filters?.is_favorite) {
+      query = query.eq('is_favorite', filters.is_favorite)
+    }
+    
+    const { data, error } = await query
+    
+    if (error) {
+      throw new Error(`Failed to fetch bookmarks: ${error.message}`)
+    }
+    
+    return data || []
   }
   
-  async createBookmark(userId: string, data: CreateBookmarkData) {
-    // 段階的メタデータ取得 → Twitter URL判定 → DB保存
+  // RLSポリシーにより自動でホワイトリスト＆所有者チェック
+  async createBookmark(data: { url: string; title?: string; description?: string }): Promise<BookmarkRow> {
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      throw new Error('User not authenticated')
+    }
+    
+    // 段階的メタデータ取得
     const metadata = await this.extractMetadataWithFallback(data.url)
     
     // Twitter URLの場合、自動タグ付け
-    if (this.isTwitterUrl(data.url)) {
-      metadata.tags = ['Twitter', ...(metadata.tags || [])]
-      metadata.type = 'tweet'
+    const isTwitterUrl = this.isTwitterUrl(data.url)
+    
+    const bookmarkData: BookmarkInsert = {
+      user_id: user.id,
+      url: data.url,
+      title: data.title || metadata.title || 'Untitled',
+      description: data.description || metadata.description,
+      thumbnail_url: metadata.image
     }
     
-    return await this.saveBookmark(userId, metadata)
+    // RLSポリシーでホワイトリスト＆所有者チェックが自動実行
+    const { data: bookmark, error } = await supabase
+      .from('bookmarks')
+      .insert(bookmarkData)
+      .select()
+      .single()
+    
+    if (error) {
+      throw new Error(`Failed to create bookmark: ${error.message}`)
+    }
+    
+    // Twitter URLの場合、自動タグ付け
+    if (isTwitterUrl && bookmark) {
+      await this.addAutomaticTag(bookmark.id, 'Twitter')
+    }
+    
+    return bookmark
+  }
+  
+  private async addAutomaticTag(bookmarkId: string, tagName: string) {
+    // タグが存在しない場合は作成
+    const { data: existingTag } = await supabase
+      .from('tags')
+      .select('id')
+      .eq('name', tagName)
+      .single()
+    
+    let tagId = existingTag?.id
+    
+    if (!tagId) {
+      const { data: newTag, error } = await supabase
+        .from('tags')
+        .insert({ name: tagName })
+        .select('id')
+        .single()
+      
+      if (error) return // タグ作成失敗時は無視
+      tagId = newTag.id
+    }
+    
+    // ブックマークとタグの関連付け
+    await supabase
+      .from('bookmark_tags')
+      .insert({ bookmark_id: bookmarkId, tag_id: tagId })
   }
   
   private async extractMetadataWithFallback(url: string): Promise<LinkPreview> {
@@ -369,8 +546,35 @@ export class BookmarkService {
     return url.replace(/[?&](utm_|fbclid|gclid)[^&]*(&|$)/g, '').replace(/\/$/, '')
   }
   
-  async updateBookmark(id: string, updates: Partial<BookmarkRow>) {
-    // 更新処理
+  async updateBookmark(id: string, updates: Partial<BookmarkRow>): Promise<BookmarkRow> {
+    // RLSポリシーにより自動で所有者チェック
+    const { data, error } = await supabase
+      .from('bookmarks')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single()
+    
+    if (error) {
+      throw new Error(`Failed to update bookmark: ${error.message}`)
+    }
+    
+    return data
+  }
+  
+  async deleteBookmark(id: string): Promise<void> {
+    // RLSポリシーにより自動で所有者チェック
+    const { error } = await supabase
+      .from('bookmarks')
+      .delete()
+      .eq('id', id)
+    
+    if (error) {
+      throw new Error(`Failed to delete bookmark: ${error.message}`)
+    }
   }
   
   private isTwitterUrl(url: string): boolean {
@@ -714,24 +918,116 @@ export async function extractWithHTMLRewriter(html: string, baseUrl: string) {
 }
 ```
 
-### 状態管理
+### 状態管理（Supabase Realtime対応）
 ```typescript
-// Zustand による軽量な状態管理
-import { create } from 'zustand'
+// hooks/use-bookmarks.ts - Supabase Realtimeと組み合わせた状態管理
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+import { BookmarkService } from '@/lib/services/bookmarks'
+import type { BookmarkRow } from '@/types/database'
 
-interface BookmarkStore {
-  bookmarks: Bookmark[]
-  loading: boolean
-  filters: BookmarkFilters
-  setBookmarks: (bookmarks: Bookmark[]) => void
-  addBookmark: (bookmark: Bookmark) => void
-  updateBookmark: (id: string, updates: Partial<Bookmark>) => void
-  setFilters: (filters: BookmarkFilters) => void
+export function useBookmarks(filters?: BookmarkFilters) {
+  const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  
+  const bookmarkService = new BookmarkService()
+  
+  // 初回データ取得
+  useEffect(() => {
+    const fetchBookmarks = async () => {
+      try {
+        setLoading(true)
+        const data = await bookmarkService.getBookmarks(filters)
+        setBookmarks(data)
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch bookmarks')
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    fetchBookmarks()
+  }, [filters])
+  
+  // Supabase Realtimeでリアルタイム更新
+  useEffect(() => {
+    const channel = supabase
+      .channel('bookmarks-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bookmarks'
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setBookmarks(prev => [payload.new as BookmarkRow, ...prev])
+          } else if (payload.eventType === 'UPDATE') {
+            setBookmarks(prev => prev.map(bookmark => 
+              bookmark.id === payload.new.id ? payload.new as BookmarkRow : bookmark
+            ))
+          } else if (payload.eventType === 'DELETE') {
+            setBookmarks(prev => prev.filter(bookmark => bookmark.id !== payload.old.id))
+          }
+        }
+      )
+      .subscribe()
+    
+    return () => {
+      channel.unsubscribe()
+    }
+  }, [])
+  
+  const createBookmark = async (data: { url: string; title?: string; description?: string }) => {
+    try {
+      const bookmark = await bookmarkService.createBookmark(data)
+      // Realtimeで自動更新されるので、手動更新は不要
+      return bookmark
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create bookmark')
+      throw err
+    }
+  }
+  
+  const updateBookmark = async (id: string, updates: Partial<BookmarkRow>) => {
+    try {
+      const bookmark = await bookmarkService.updateBookmark(id, updates)
+      return bookmark
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update bookmark')
+      throw err
+    }
+  }
+  
+  const deleteBookmark = async (id: string) => {
+    try {
+      await bookmarkService.deleteBookmark(id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete bookmark')
+      throw err
+    }
+  }
+  
+  return {
+    bookmarks,
+    loading,
+    error,
+    createBookmark,
+    updateBookmark,
+    deleteBookmark,
+    refetch: () => {
+      // 手動リフレッシュが必要な場合
+      const fetchBookmarks = async () => {
+        const data = await bookmarkService.getBookmarks(filters)
+        setBookmarks(data)
+      }
+      fetchBookmarks()
+    }
+  }
 }
-
-export const useBookmarkStore = create<BookmarkStore>((set, get) => ({
-  // ストア実装
-}))
 ```
 
 ## Chrome拡張機能 アーキテクチャ

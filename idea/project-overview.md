@@ -22,7 +22,7 @@ EncoreはPocketやはてなブックマークのような「後で読む」サ�
 - **フロントエンド**: Next.js 15 + TypeScript + Tailwind CSS v4
 - **バックエンド**: Next.js API Routes + Supabase
 - **データベース**: Supabase (PostgreSQL)
-- **認証**: NextAuth.js v5 (Google Provider)
+- **認証**: Supabase Auth (Google Provider + RLS)
 - **ホスティング**: Vercel
 - **拡張機能**: Chrome Extension
 - **メタデータ取得**: 自前実装（Phase1）→ 外部APIフォールバック（Phase2）→ 専用パーサー（Phase3）
