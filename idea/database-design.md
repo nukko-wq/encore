@@ -79,6 +79,14 @@ CREATE POLICY "Users can manage own profile" ON public.user_profiles
 
 #### 2. bookmarks（ブックマーク）
 ```sql
+-- ENUM型を先に定義（将来の拡張性を考慮）
+CREATE TYPE bookmark_status AS ENUM (
+  'unread',     -- 未読
+  'read',       -- 既読
+  'archived',   -- アーカイブ
+  'deleted'     -- 論理削除
+);
+
 create table if not exists public.bookmarks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -90,7 +98,7 @@ create table if not exists public.bookmarks (
   memo text,
   is_favorite boolean default false,
   is_pinned boolean default false,
-  status text check (status in ('unread','read')) default 'unread',
+  status bookmark_status not null default 'unread', -- ENUM型でパフォーマンス向上
   pinned_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
@@ -104,7 +112,7 @@ create policy "read_own_if_allowed" on public.bookmarks
 for select using (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt()->>'email'))
+              where ae.email = auth.email())
 );
 
 -- ホワイトリスト＆本人のみ書き込み可能
@@ -112,7 +120,7 @@ create policy "write_own_if_allowed" on public.bookmarks
 for insert with check (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt()->>'email'))
+              where ae.email = auth.email())
 );
 
 -- 更新・削除ポリシー
@@ -120,14 +128,14 @@ create policy "update_own_if_allowed" on public.bookmarks
 for update using (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt()->>'email'))
+              where ae.email = auth.email())
 );
 
 create policy "delete_own_if_allowed" on public.bookmarks
 for delete using (
   user_id = auth.uid()
   and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt()->>'email'))
+              where ae.email = auth.email())
 );
 ```
 
@@ -283,9 +291,14 @@ CREATE INDEX idx_external_api_summary_date_source ON external_api_summary(date, 
 ```sql
 -- パフォーマンス最適化用インデックス
 CREATE INDEX idx_bookmarks_user_created_at ON bookmarks(user_id, created_at DESC);
+CREATE INDEX idx_bookmarks_user_status_created ON bookmarks(user_id, status, created_at DESC); -- ENUM型対応
 CREATE INDEX idx_bookmarks_user_favorite ON bookmarks(user_id, is_favorite);
 CREATE INDEX idx_bookmarks_user_pinned ON bookmarks(user_id, is_pinned);
 CREATE INDEX idx_bookmarks_url ON bookmarks(url);
+
+-- ステータス別最適化インデックス（論理削除対応）
+CREATE INDEX idx_bookmarks_status_favorite ON bookmarks(status, is_favorite) WHERE status != 'deleted';
+CREATE INDEX idx_bookmarks_status_pinned ON bookmarks(status, is_pinned) WHERE status != 'deleted' AND is_pinned = true;
 
 -- URL重複防止用ユニークインデックス
 CREATE UNIQUE INDEX uniq_bookmarks_user_canonical 
