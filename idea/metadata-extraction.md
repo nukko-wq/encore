@@ -6,10 +6,10 @@
 src/
 ├── app/
 │   ├── api/
-│   │   ├── extract/
-│   │   │   ├── route.ts          -- Edge超軽量抽出
-│   │   │   ├── deep/
-│   │   │   │   └── route.ts      -- Node精度重視
+│   │   ├── preview/
+│   │   │   ├── route.ts          -- メインメタデータ抽出
+│   │   │   ├── check/
+│   │   │   │   └── route.ts      -- キャッシュチェック
 │   │   │   └── external/
 │   │   │       └── route.ts      -- 外部APIフォールバック
 │   │   ├── cron/
@@ -18,8 +18,7 @@ src/
 ├── lib/
 │   └── services/
 │       └── metadata/
-│           ├── edge-extractor.ts     -- Edge超軽量抽出
-│           ├── node-extractor.ts     -- Node精度重視
+│           ├── preview-extractor.ts  -- メインメタデータ抽出
 │           ├── external-api.ts       -- 外部APIフォールバック
 │           ├── site-handlers.ts      -- 特定サイト専用パーサー
 │           ├── cache-manager.ts      -- キャッシュ管理

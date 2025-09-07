@@ -36,21 +36,20 @@
 // ORDER BY similarity(title || ' ' || description || ' ' || memo, 'search_term') DESC;
 ```
 
-### メタデータ取得API（三段構え）
+### メタデータ取得API（現実解）
 ```typescript
-// GET /api/extract（runtime: "edge"）- 超軽量Edge抽出
-//   HTMLRewriterで<meta>/<title>だけ抽出
-//   速度最優先、依存関係なし
-//   タイトル/画像/抜粋のどれかが欠けたら次へ
+// GET /api/preview/check（runtime: "edge"）- キャッシュチェック
+//   URL正規化とキャッシュ判定
+//   軽量処理のみ、速度最優先
 
-// POST /api/extract/deep（runtime: "nodejs"）- Node精度重視
-//   metascraperで統合取得
+// POST /api/preview（runtime: "nodejs"）- メインメタデータ抽出
+//   Cheerioで OGP/メタデータ抽出
 //   description無し時はReadability+jsdomで本文抜粋
-//   日本語は全角160-200文字程度に
+//   日本語は全角160-200文字程度に制限
 
-// POST /api/extract/external - 外部APIフォールバック
+// POST /api/preview/external - 外部APIフォールバック（オプション）
 //   JSレンダリング必須や難サイト用
-//   Microlink/Iframely/OpenGraph.io等
+//   Microlink API等を使用
 //   環境変数でON/OFF（METADATA_EXTERNAL_ENABLED=true）
 
 // POST /api/twitter/enhance - Twitter URL 追加情報（オプション）
