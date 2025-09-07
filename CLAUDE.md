@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture & Structure
 
-This is a Next.js 15 project using the App Router with TypeScript and Tailwind CSS v4.
+This is a bookmark management system called "Encore" built with Next.js 15 and the App Router.
 
 ### Key Technologies
 - **Next.js 15.5.2** with Turbopack for faster builds and development
@@ -28,10 +28,22 @@ This is a Next.js 15 project using the App Router with TypeScript and Tailwind C
 - **Tailwind CSS v4** via PostCSS
 - **Biome** for linting and formatting (replaces ESLint + Prettier)
 
+### Project Purpose
+Encore is designed as a comprehensive bookmark management system with advanced metadata extraction capabilities. See `idea/` directory for detailed technical architecture and specifications.
+
 ### File Structure
 - `src/app/` - Next.js App Router pages and layouts
+- `src/app/api/` - API routes for metadata extraction
+- `idea/` - Technical specifications and architecture documents
 - `@/*` path mapping points to `./src/*`
 - Standard Next.js App Router conventions apply
+
+### Architecture Documents
+Critical design documents are located in the `idea/` directory:
+- `database-design.md` - Database schema and design patterns
+- `api-design.md` - API endpoints and data access patterns
+- `metadata-extraction.md` - Core metadata extraction system
+- `technical-architecture.md` - Overall system architecture index
 
 ### Code Style (Biome Configuration)
 - **Indentation**: 2 spaces
@@ -48,3 +60,9 @@ After any code changes:
 3. `npm run build` - Verify build succeeds
 
 No testing framework is currently configured - manual testing via `npm run dev` is required.
+
+## Important Notes
+
+- **Language**: Project documentation in `idea/` and `.claude/CLAUDE.md` indicate responses should be in Japanese
+- **Architecture First**: Always consult the `idea/` directory for system architecture before making changes
+- **Metadata System**: Core functionality revolves around URL metadata extraction with Edge/Node/External API fallback strategy
