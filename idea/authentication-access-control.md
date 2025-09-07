@@ -71,13 +71,13 @@ export const setupAuthHook = () => {
   })
 }
 
-// ホワイトリストメール確認
+// ホワイトリストメール確認（citextにより大文字小文字は自動無視）
 export const checkWhitelistEmail = async (email: string): Promise<boolean> => {
   try {
     const { data, error } = await supabase
       .from('allowed_emails')
       .select('email')
-      .eq('email', email.toLowerCase())
+      .eq('email', email) // citextにより自動で大文字小文字無視
       .single()
     
     return !!data && !error
@@ -87,11 +87,11 @@ export const checkWhitelistEmail = async (email: string): Promise<boolean> => {
   }
 }
 
-// ホワイトリストにメール追加
+// ホワイトリストにメール追加（citextにより大文字小文字は自動無視）
 export const addToWhitelist = async (email: string) => {
   const { data, error } = await supabase
     .from('allowed_emails')
-    .insert({ email: email.toLowerCase() })
+    .insert({ email: email }) // citextにより自動で大文字小文字無視
   
   return { data, error }
 }
@@ -186,8 +186,11 @@ sequenceDiagram
 ### データベース設計
 ```sql
 -- ホワイトリストテーブル（シンプル設計）
+-- citextで大文字小文字を自動無視
+create extension if not exists citext;
+
 create table if not exists public.allowed_emails (
-  email text primary key
+  email citext primary key
 );
 
 -- 初期ホワイトリストの設定例
@@ -202,13 +205,13 @@ on conflict (email) do nothing;
 // lib/whitelist.ts
 import { supabase } from './supabase'
 
-// ホワイトリストメール確認
+// ホワイトリストメール確認（citextにより大文字小文字は自動無視）
 export async function checkWhitelistEmail(email: string): Promise<boolean> {
   try {
     const { data, error } = await supabase
       .from('allowed_emails')
       .select('email')
-      .eq('email', email.toLowerCase())
+      .eq('email', email) // citextにより自動で大文字小文字無視
       .single()
     
     return !!data && !error
@@ -218,11 +221,11 @@ export async function checkWhitelistEmail(email: string): Promise<boolean> {
   }
 }
 
-// ホワイトリストにメール追加
+// ホワイトリストにメール追加（citextにより大文字小文字は自動無視）
 export async function addToWhitelist(email: string) {
   const { data, error } = await supabase
     .from('allowed_emails')
-    .insert({ email: email.toLowerCase() })
+    .insert({ email: email }) // citextにより自動で大文字小文字無視
   
   return { data, error }
 }
@@ -237,12 +240,12 @@ export async function getWhitelistEmails() {
   return { data, error }
 }
 
-// ホワイトリストからメール削除
+// ホワイトリストからメール削除（citextにより大文字小文字は自動無視）
 export async function removeFromWhitelist(email: string) {
   const { error } = await supabase
     .from('allowed_emails')
     .delete()
-    .eq('email', email.toLowerCase())
+    .eq('email', email) // citextにより自動で大文字小文字無視
   
   return { error }
 }
