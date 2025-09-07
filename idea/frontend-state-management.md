@@ -246,7 +246,7 @@ export function useAuth() {
 ### useTags Hook
 ```typescript
 // hooks/use-tags.ts - タグ階層管理対応
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { TagRow } from '@/types/database'
 
@@ -261,31 +261,32 @@ export function useTags() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // タグ取得
-  useEffect(() => {
-    const fetchTags = async () => {
-      try {
-        setLoading(true)
-        const { data, error } = await supabase
-          .from('tags')
-          .select('*')
-          .order('parent_tag_id', { ascending: true }) // 親タグを先に
-          .order('display_order', { ascending: true })   // 同階層内の順序
+  // タグ取得関数（useCallbackで依存関係を管理）
+  const fetchTags = useCallback(async () => {
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('tags')
+        .select('*')
+        .order('parent_tag_id', { ascending: true }) // 親タグを先に
+        .order('display_order', { ascending: true })   // 同階層内の順序
 
-        if (error) throw error
+      if (error) throw error
 
-        setTags(data || [])
-        setTagsTree(buildTagTree(data || []))
-        setError(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch tags')
-      } finally {
-        setLoading(false)
-      }
+      setTags(data || [])
+      setTagsTree(buildTagTree(data || []))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch tags')
+    } finally {
+      setLoading(false)
     }
+  }, []) // 依存関係は空配列
 
+  // 初回タグ取得
+  useEffect(() => {
     fetchTags()
-  }, [])
+  }, [fetchTags])
 
   // Realtime更新
   useEffect(() => {
@@ -308,7 +309,7 @@ export function useTags() {
     return () => {
       channel.unsubscribe()
     }
-  }, [])
+  }, [fetchTags]) // fetchTagsを依存関係に追加
 
   const createTag = async (data: {
     name: string

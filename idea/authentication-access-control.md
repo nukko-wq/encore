@@ -259,6 +259,7 @@ create table if not exists public.bookmarks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   url text not null,
+  canonical_url text not null, -- 正規化済みURL（重複防止用）
   title text,
   description text,
   thumbnail_url text,

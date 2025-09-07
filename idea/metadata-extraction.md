@@ -104,7 +104,7 @@ export async function POST(request: Request) {
 ```typescript
 // app/api/extract/external/route.ts - 外部APIフォールバック
 export async function POST(request: Request) {
-  if (process.env.METADATA_FALLBACK_ENABLED !== 'true') {
+  if (process.env.METADATA_EXTERNAL_ENABLED !== 'true') {
     return Response.json({ error: 'External API disabled' }, { status: 403 })
   }
   
@@ -160,7 +160,7 @@ export class MetadataService {
           console.warn('Node extraction failed:', nodeError)
           
           // 4. 外部APIフォールバック
-          if (process.env.METADATA_FALLBACK_ENABLED === 'true') {
+          if (process.env.METADATA_EXTERNAL_ENABLED === 'true') {
             try {
               const externalResult = await this.callExternalExtractor(normalizedUrl)
               metadata = { ...metadata, ...externalResult.data }

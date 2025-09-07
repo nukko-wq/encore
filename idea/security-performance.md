@@ -70,15 +70,20 @@ export async function safeFetch(url: string, options: RequestInit = {}): Promise
         'User-Agent': 'EncoreMetaBot/1.0',
         'Accept': 'text/html,application/xhtml+xml',
         'Accept-Language': 'ja,en;q=0.9',
-        ...options.headers
+        ...(options.headers || {})
       },
       // サイズ制限（先靣1-2MBで打ち切り）
       // Note: 実際はstreamで処理してサイズチェック
     })
     
     // リダイレクト制限（最大5回）
-    if (response.redirected && this.getRedirectCount(response) > 5) {
-      throw new Error('Too many redirects')
+    let redirectCount = 0
+    if (response.url !== url) {
+      // レスポンスURLが元URLと異なる場合はリダイレクトが発生
+      redirectCount = (options as any).__redirectCount || 0
+      if (redirectCount > 5) {
+        throw new Error('Too many redirects')
+      }
     }
     
     return response
@@ -163,12 +168,41 @@ const nextConfig = {
           },
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; img-src 'self' data: https:; script-src 'self' 'unsafe-inline'",
+            value: "default-src 'self'; img-src 'self' data: https:; script-src 'self' 'nonce-{{NONCE}}'; style-src 'self' 'nonce-{{NONCE}}'; connect-src 'self' https://*.supabase.co https://*.google.com",
           },
         ],
       },
     ]
   },
+}
+
+// lib/security/nonce.ts - Nonce生成ヘルパー
+import { randomBytes } from 'crypto'
+
+export function generateNonce(): string {
+  return randomBytes(16).toString('base64')
+}
+
+// middleware.ts - CSP nonce設定
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+import { generateNonce } from '@/lib/security/nonce'
+
+export function middleware(request: NextRequest) {
+  const nonce = generateNonce()
+  const response = NextResponse.next()
+  
+  // CSPヘッダーにnonceを設定
+  const cspValue = "default-src 'self'; img-src 'self' data: https:; script-src 'self' 'nonce-" + nonce + "'; style-src 'self' 'nonce-" + nonce + "'; connect-src 'self' https://*.supabase.co https://*.google.com"
+  
+  response.headers.set('Content-Security-Policy', cspValue)
+  response.headers.set('X-Nonce', nonce) // コンポーネントでnonce使用のため
+  
+  return response
+}
+
+export const config = {
+  matcher: '/((?!api|_next/static|_next/image|favicon.ico).*)',
 }
 ```
 
@@ -330,7 +364,7 @@ export function useInfiniteBookmarks(filters?: BookmarkFilters) {
     } finally {
       setLoading(false)
     }
-  }, [filters, loading])
+  }, [filters, loading, bookmarkService])
 
   // 初回読み込み
   useEffect(() => {
@@ -537,7 +571,7 @@ GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 
 # メタデータ取得
-METADATA_FALLBACK_ENABLED=false  # trueで外部API有効
+METADATA_EXTERNAL_ENABLED=false  # trueで外部API有効
 MICROLINK_API_KEY=your_microlink_key  # オプション
 
 # 日本語検索設定

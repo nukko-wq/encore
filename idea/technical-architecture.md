@@ -65,7 +65,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 GOOGLE_CLIENT_ID=your_google_client_id
 
 # メタデータ取得制御
-METADATA_FALLBACK_ENABLED=false  # 外部API使用制御
+METADATA_EXTERNAL_ENABLED=false  # 外部API使用制御
 
 # レートリミット
 RATE_LIMIT_USER_RPM=20      # 認証済みユーザー制限

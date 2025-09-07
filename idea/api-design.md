@@ -51,7 +51,7 @@
 // POST /api/extract/external - 外部APIフォールバック
 //   JSレンダリング必須や難サイト用
 //   Microlink/Iframely/OpenGraph.io等
-//   環境変数でON/OFF（METADATA_FALLBACK_ENABLED=true）
+//   環境変数でON/OFF（METADATA_EXTERNAL_ENABLED=true）
 
 // POST /api/twitter/enhance - Twitter URL 追加情報（オプション）
 // POST /api/import/pocket - Pocket インポート
@@ -148,6 +148,14 @@ import type { Database } from '@/types/database'
 type BookmarkRow = Database['public']['Tables']['bookmarks']['Row']
 type BookmarkInsert = Database['public']['Tables']['bookmarks']['Insert']
 
+interface BookmarkFilters {
+  status?: 'unread' | 'read'
+  is_favorite?: boolean
+  is_pinned?: boolean
+  offset?: number
+  limit?: number
+}
+
 export class BookmarkService {
   // RLSポリシーにより自動でユーザーのデータのみ取得
   async getBookmarks(filters?: BookmarkFilters): Promise<BookmarkRow[]> {
@@ -162,6 +170,13 @@ export class BookmarkService {
     
     if (filters?.is_favorite) {
       query = query.eq('is_favorite', filters.is_favorite)
+    }
+    
+    // ページングサポート
+    if (filters?.offset !== undefined && filters?.limit !== undefined) {
+      query = query.range(filters.offset, filters.offset + filters.limit - 1)
+    } else if (filters?.limit !== undefined) {
+      query = query.limit(filters.limit)
     }
     
     const { data, error } = await query
