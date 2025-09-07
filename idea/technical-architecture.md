@@ -96,7 +96,31 @@ CREATE TABLE bookmark_tags (
 );
 ```
 
-#### 5. bookmark_metadata（追加メタデータ）
+#### 5. link_previews（リンクプレビューキャッシュ）
+```sql
+CREATE TABLE link_previews (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  url text UNIQUE NOT NULL, -- 正規化済みURL
+  title text,
+  description text,
+  image text, -- 絶対URL
+  favicon text, -- 絶対URL
+  site_name text,
+  source text NOT NULL, -- 'edge', 'node', 'readability', 'external'
+  status text DEFAULT 'success', -- 'success', 'failed', 'partial'
+  fetched_at timestamp with time zone DEFAULT now(),
+  revalidate_at timestamp with time zone DEFAULT (now() + interval '7 days'),
+  retry_count integer DEFAULT 0,
+  error_message text
+);
+
+-- URL正規化とキャッシュ用インデックス
+CREATE INDEX idx_link_previews_url ON link_previews(url);
+CREATE INDEX idx_link_previews_revalidate ON link_previews(revalidate_at) WHERE status = 'success';
+CREATE INDEX idx_link_previews_retry ON link_previews(fetched_at, retry_count) WHERE status = 'failed';
+```
+
+#### 6. bookmark_metadata（追加メタデータ）
 ```sql
 CREATE TABLE bookmark_metadata (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -176,14 +200,24 @@ CREATE INDEX idx_bookmarks_search ON bookmarks USING gin(
 // GET /api/bookmarks/feed?page=1&limit=20&sort=created_at&order=desc
 ```
 
-#### メタデータ・外部連携 API
+#### メタデータ取得API（三段構え）
 ```typescript
-// POST /api/extract-metadata - 段階的メタデータ取得
-//   1. 自前実装でのOGP取得
-//   2. 失敗時は外部API（Microlink等）フォールバック
-//   3. 特定サイト専用パーサー適用
+// GET /api/extract（runtime: "edge"）- 超軽量Edge抽出
+//   HTMLRewriterで<meta>/<title>だけ抽出
+//   速度最優先、依存関係なし
+//   タイトル/画像/抜粋のどれかが欠けたら次へ
 
-// POST /api/twitter/enhance - Twitter URL の追加情報取得（オプション）
+// POST /api/extract/deep（runtime: "nodejs"）- Node精度重視
+//   metascraperで統合取得
+//   description無し時はReadability+jsdomで本文抜粋
+//   日本語は全角160-200文字程度に
+
+// POST /api/extract/external - 外部APIフォールバック
+//   JSレンダリング必須や難サイト用
+//   Microlink/Iframely/OpenGraph.io等
+//   環境変数でON/OFF（USE_EXTERNAL_PREVIEW=1）
+
+// POST /api/twitter/enhance - Twitter URL 追加情報（オプション）
 // POST /api/import/pocket - Pocket インポート
 // GET /api/export - データエクスポート
 ```
@@ -271,22 +305,68 @@ export class BookmarkService {
     return await this.saveBookmark(userId, metadata)
   }
   
-  private async extractMetadataWithFallback(url: string) {
-    // Phase 1: 自前実装を試行
-    let metadata = await this.extractMetadata(url)
+  private async extractMetadataWithFallback(url: string): Promise<LinkPreview> {
+    const normalizedUrl = this.normalizeUrl(url)
     
-    // Phase 2: 失敗時は外部APIを利用
-    if (!metadata.title) {
-      metadata = await this.getMetadataFromAPI(url)
+    // キャッシュチェック
+    const cached = await this.getCachedPreview(normalizedUrl)
+    if (cached && !this.shouldRevalidate(cached)) {
+      return cached
     }
     
-    // Phase 3: 特定サイト用の後処理
-    const handler = this.getSiteHandler(url)
+    // Phase 1: Edge超軽量抽出
+    let metadata = await this.extractWithEdge(normalizedUrl)
+    let source = 'edge'
+    
+    // Phase 2: Node精度重視（Edgeで不十分な場合）
+    if (this.isIncomplete(metadata)) {
+      const nodeResult = await this.extractWithNode(normalizedUrl)
+      metadata = this.mergeMetadata(metadata, nodeResult)
+      source = 'node'
+    }
+    
+    // Phase 3: 外部APIフォールバック（環境変数で制御）
+    if (this.isIncomplete(metadata) && process.env.USE_EXTERNAL_PREVIEW === '1') {
+      const externalResult = await this.extractWithExternalAPI(normalizedUrl)
+      metadata = this.mergeMetadata(metadata, externalResult)
+      source = 'external'
+    }
+    
+    // 特定サイト専用処理
+    const handler = this.getSiteHandler(normalizedUrl)
     if (handler) {
-      metadata = await handler(url, metadata)
+      metadata = await handler(normalizedUrl, metadata)
+      source = metadata.source || source
     }
     
-    return metadata
+    // キャッシュ保存
+    const preview = await this.savePreviewCache(normalizedUrl, metadata, source)
+    
+    return preview
+  }
+  
+  private async extractWithEdge(url: string): Promise<Partial<LinkPreview>> {
+    // HTMLRewriterで<meta>/<title>だけ抽出
+    // 優先度: og:title→twitter:title→<title>
+    // 優先度: og:description→twitter:description→meta[name=description]
+    // 優先度: og:image→twitter:image→apple-touch-icon→icon
+    return { /* Edge抽出結果 */ }
+  }
+  
+  private async extractWithNode(url: string): Promise<Partial<LinkPreview>> {
+    // metascraperでtitle/description/imageを統合取得
+    // description無し時はReadability+jsdomで本文抜粋
+    return { /* Node抽出結果 */ }
+  }
+  
+  private isIncomplete(metadata: Partial<LinkPreview>): boolean {
+    // タイトル or 画像 or 抜粋のどれかが欠けているかチェック
+    return !metadata.title || !metadata.image || !metadata.description
+  }
+  
+  private normalizeUrl(url: string): string {
+    // トラッキングクエリ除去・末尾スラッシュ統一
+    return url.replace(/[?&](utm_|fbclid|gclid)[^&]*(&|$)/g, '').replace(/\/$/, '')
   }
   
   async updateBookmark(id: string, updates: Partial<BookmarkRow>) {
@@ -324,6 +404,15 @@ src/
 │   │   ├── [id]/
 │   │   └── page.tsx
 │   ├── api/
+│   │   ├── extract/
+│   │   │   ├── route.ts          -- Edge超軽量抽出
+│   │   │   ├── deep/
+│   │   │   │   └── route.ts      -- Node精度重視
+│   │   │   └── external/
+│   │   │       └── route.ts      -- 外部APIフォールバック
+│   │   ├── cron/
+│   │   │   └── revalidate/
+│   │   │       └── route.ts      -- バックグラウンド再取得
 │   │   ├── bookmarks/
 │   │   ├── tags/
 │   │   └── auth/
@@ -352,10 +441,12 @@ src/
 │       ├── bookmarks.ts
 │       ├── tags.ts
 │       └── metadata/
-│           ├── extractor.ts      -- 自前実装
-│           ├── fallback-api.ts   -- 外部APIフォールバック
-│           ├── site-handlers.ts  -- 特定サイト専用パーサー
-│           └── index.ts          -- 統合インターフェース
+│           ├── edge-extractor.ts     -- Edge超軽量抽出
+│           ├── node-extractor.ts     -- Node精度重視
+│           ├── external-api.ts       -- 外部APIフォールバック
+│           ├── site-handlers.ts      -- 特定サイト専用パーサー
+│           ├── cache-manager.ts      -- キャッシュ管理
+│           └── index.ts              -- 統合サービス
 ├── hooks/
 │   ├── use-bookmarks.ts
 │   ├── use-tags.ts
@@ -363,141 +454,262 @@ src/
 └── types/
     ├── database.ts
     ├── api.ts
+    ├── link-preview.ts
     └── common.ts
 ```
 
-### メタデータ抽出システム設計
+### メタデータ抽出システム設計（三段構え）
+
+#### APIルート構成
 ```typescript
-// lib/services/metadata/index.ts - 統合インターフェース
-export class MetadataExtractor {
-  async extractMetadata(url: string): Promise<Metadata> {
-    // Phase 1: 自前実装を試行
-    let metadata = await this.extractWithCheerio(url)
-    
-    // Phase 2: 失敗時は外部APIフォールバック
-    if (!metadata.title && process.env.FALLBACK_API_ENABLED) {
-      metadata = await this.extractWithFallbackAPI(url)
-    }
-    
-    // Phase 3: 特定サイト専用パーサー
-    const siteHandler = this.getSiteHandler(url)
-    if (siteHandler) {
-      metadata = await siteHandler(url, metadata)
-    }
-    
-    return this.sanitizeMetadata(metadata)
-  }
+// app/api/extract/route.ts - Edge超軽量抽出
+export const runtime = 'edge'
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const url = searchParams.get('url')
   
-  private getSiteHandler(url: string) {
-    const domain = new URL(url).hostname.replace('www.', '')
-    const handlers = {
-      'github.com': this.handleGitHub,
-      'youtube.com': this.handleYouTube,
-      'youtu.be': this.handleYouTube,
-      'twitter.com': this.handleTwitter,
-      'x.com': this.handleTwitter,
-      'qiita.com': this.handleQiita,
-      'zenn.dev': this.handleZenn
-    }
-    return handlers[domain]
-  }
-}
-
-// lib/services/metadata/extractor.ts - 自前実装
-import cheerio from 'cheerio'
-
-export async function extractWithCheerio(url: string): Promise<Metadata> {
+  if (!url) return Response.json({ error: 'URL required' }, { status: 400 })
+  
   try {
     const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; EncoreBot/1.0)',
-        'Accept': 'text/html,application/xhtml+xml',
-      },
-      timeout: 10000
+      headers: { 'User-Agent': 'EncoreMetaBot/1.0' },
+      signal: AbortSignal.timeout(5000)
     })
     
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    
     const html = await response.text()
-    const $ = cheerio.load(html)
     
-    return {
-      title: extractTitle($),
-      description: extractDescription($),
-      image: extractImage($, url),
-      url: extractCanonicalUrl($, url),
-      siteName: extractSiteName($),
-      favicon: extractFavicon($, url)
-    }
+    // HTMLRewriterで軽量抽出
+    const metadata = await extractWithHTMLRewriter(html, url)
+    
+    return Response.json({
+      success: true,
+      data: metadata,
+      source: 'edge',
+      complete: isComplete(metadata)
+    })
   } catch (error) {
-    console.error('Cheerio extraction failed:', error)
-    return { title: '', description: '', image: null, url }
+    return Response.json({ 
+      success: false, 
+      error: error.message,
+      source: 'edge' 
+    }, { status: 500 })
   }
 }
 
-function extractTitle($: CheerioAPI): string {
-  return $('meta[property="og:title"]').attr('content') ||
-         $('meta[name="twitter:title"]').attr('content') ||
-         $('title').text().trim() ||
-         $('h1').first().text().trim() || ''
+// app/api/extract/deep/route.ts - Node精度重視
+export const runtime = 'nodejs'
+
+export async function POST(request: Request) {
+  const { url } = await request.json()
+  
+  try {
+    // metascraperで統合取得
+    const metadata = await extractWithMetascraper(url)
+    
+    // descriptionが無い時はReadabilityで本文抜粋
+    if (!metadata.description) {
+      metadata.description = await extractContentWithReadability(url)
+    }
+    
+    return Response.json({
+      success: true,
+      data: metadata,
+      source: 'node'
+    })
+  } catch (error) {
+    return Response.json({ 
+      success: false, 
+      error: error.message,
+      source: 'node' 
+    }, { status: 500 })
+  }
 }
 
-// lib/services/metadata/fallback-api.ts - 外部APIフォールバック
-export async function extractWithFallbackAPI(url: string): Promise<Metadata> {
-  const apiServices = [
-    { name: 'microlink', endpoint: 'https://api.microlink.io/' },
-    { name: 'linkpreview', endpoint: 'https://api.linkpreview.net/' }
-  ]
+// app/api/extract/external/route.ts - 外部APIフォールバック
+export async function POST(request: Request) {
+  if (process.env.USE_EXTERNAL_PREVIEW !== '1') {
+    return Response.json({ error: 'External API disabled' }, { status: 403 })
+  }
   
-  for (const service of apiServices) {
+  const { url } = await request.json()
+  
+  try {
+    const metadata = await extractWithExternalAPI(url)
+    
+    return Response.json({
+      success: true,
+      data: metadata,
+      source: 'external'
+    })
+  } catch (error) {
+    return Response.json({ 
+      success: false, 
+      error: error.message,
+      source: 'external' 
+    }, { status: 500 })
+  }
+}
+```
+
+#### 統合メタデータサービス
+```typescript
+// lib/services/metadata/index.ts
+export class MetadataService {
+  async extractMetadata(url: string): Promise<LinkPreview> {
+    const normalizedUrl = this.normalizeUrl(url)
+    
+    // 1. キャッシュチェック
+    const cached = await this.getCachedPreview(normalizedUrl)
+    if (cached && !this.shouldRevalidate(cached)) {
+      return cached
+    }
+    
+    let metadata: Partial<LinkPreview> = {}
+    let source = 'edge'
+    
+    // 2. Edge超軽量抽出
     try {
-      const response = await fetch(`${service.endpoint}?url=${encodeURIComponent(url)}`)
-      const data = await response.json()
+      const edgeResult = await this.callEdgeExtractor(normalizedUrl)
+      metadata = edgeResult.data
       
-      if (service.name === 'microlink' && data.status === 'success') {
-        return {
-          title: data.data.title || '',
-          description: data.data.description || '',
-          image: data.data.image?.url || null,
-          url: data.data.url || url,
-          siteName: data.data.publisher || ''
+      // 完全でない場合は次の段階へ
+      if (!edgeResult.complete) {
+        // 3. Node精度重視
+        try {
+          const nodeResult = await this.callNodeExtractor(normalizedUrl)
+          metadata = { ...metadata, ...nodeResult.data }
+          source = 'node'
+        } catch (nodeError) {
+          console.warn('Node extraction failed:', nodeError)
+          
+          // 4. 外部APIフォールバック
+          if (process.env.USE_EXTERNAL_PREVIEW === '1') {
+            try {
+              const externalResult = await this.callExternalExtractor(normalizedUrl)
+              metadata = { ...metadata, ...externalResult.data }
+              source = 'external'
+            } catch (externalError) {
+              console.warn('External API failed:', externalError)
+            }
+          }
         }
       }
-    } catch (error) {
-      console.warn(`${service.name} API failed:`, error)
-      continue
+    } catch (edgeError) {
+      console.warn('Edge extraction failed:', edgeError)
+      // Edgeで失敗した場合は直接Nodeへ
     }
+    
+    // 5. 特定サイト専用処理
+    const handler = this.getSiteHandler(normalizedUrl)
+    if (handler) {
+      metadata = await handler(normalizedUrl, metadata)
+    }
+    
+    // 6. キャッシュ保存と返却
+    const preview = await this.savePreviewCache(normalizedUrl, metadata, source)
+    return preview
   }
   
-  return { title: '', description: '', image: null, url }
+  private async callEdgeExtractor(url: string) {
+    const response = await fetch(`/api/extract?url=${encodeURIComponent(url)}`)
+    return await response.json()
+  }
+  
+  private async callNodeExtractor(url: string) {
+    const response = await fetch('/api/extract/deep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    })
+    return await response.json()
+  }
+  
+  private shouldRevalidate(cached: LinkPreview): boolean {
+    return new Date() > new Date(cached.revalidate_at)
+  }
+  
+  private normalizeUrl(url: string): string {
+    // トラッキングパラメータ除去
+    const urlObj = new URL(url)
+    const trackingParams = ['utm_source', 'utm_medium', 'utm_campaign', 'fbclid', 'gclid']
+    trackingParams.forEach(param => urlObj.searchParams.delete(param))
+    
+    // 末尾スラッシュ統一
+    return urlObj.toString().replace(/\/$/, '')
+  }
+}
+```
+
+#### Edge抽出器（HTMLRewriter）
+```typescript
+// lib/extractors/edge.ts
+class MetaExtractor {
+  title = ''
+  description = ''
+  image = ''
+  favicon = ''
+  
+  element(element: Element) {
+    const property = element.getAttribute('property')
+    const name = element.getAttribute('name')
+    const content = element.getAttribute('content')
+    
+    if (!content) return
+    
+    // タイトルの優先度
+    if (!this.title) {
+      if (property === 'og:title' || name === 'twitter:title') {
+        this.title = content
+      }
+    }
+    
+    // 説明の優先度
+    if (!this.description) {
+      if (property === 'og:description' || name === 'twitter:description' || name === 'description') {
+        this.description = content
+      }
+    }
+    
+    // 画像の優先度
+    if (!this.image) {
+      if (property === 'og:image' || name === 'twitter:image') {
+        this.image = new URL(content, this.baseUrl).href
+      }
+    }
+  }
 }
 
-// lib/services/metadata/site-handlers.ts - 特定サイト専用パーサー
-export const siteHandlers = {
-  async handleGitHub(url: string, metadata: Metadata): Promise<Metadata> {
-    // GitHub特有の情報を追加取得
-    const repoMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)/)
-    if (repoMatch) {
-      const [, owner, repo] = repoMatch
-      // GitHub API呼び出しでstar数、言語等を取得
-      metadata.tags = ['GitHub', 'Development']
-      metadata.type = 'repository'
-    }
-    return metadata
-  },
+export async function extractWithHTMLRewriter(html: string, baseUrl: string) {
+  const extractor = new MetaExtractor()
   
-  async handleTwitter(url: string, metadata: Metadata): Promise<Metadata> {
-    // Twitter URLの特別処理
-    metadata.tags = ['Twitter', 'Social']
-    metadata.type = 'tweet'
-    return metadata
-  },
+  const rewriter = new HTMLRewriter()
+    .on('meta', extractor)
+    .on('title', {
+      text(text) {
+        if (!extractor.title) {
+          extractor.title = text.text
+        }
+      }
+    })
+    .on('link[rel="icon"], link[rel="apple-touch-icon"]', {
+      element(element) {
+        if (!extractor.favicon) {
+          const href = element.getAttribute('href')
+          if (href) {
+            extractor.favicon = new URL(href, baseUrl).href
+          }
+        }
+      }
+    })
   
-  async handleYouTube(url: string, metadata: Metadata): Promise<Metadata> {
-    // YouTube動画の情報強化
-    metadata.tags = ['YouTube', 'Video']
-    metadata.type = 'video'
-    return metadata
+  await rewriter.transform(new Response(html)).text()
+  
+  return {
+    title: extractor.title,
+    description: extractor.description,
+    image: extractor.image,
+    favicon: extractor.favicon
   }
 }
 ```
@@ -558,19 +770,362 @@ export const useBookmarkStore = create<BookmarkStore>((set, get) => ({
 - JWT トークンベースの認証
 - Chrome Storage API でのローカル設定保存
 
+## キャッシュ・再取得戦略
+
+### キャッシュライフサイクル
+```typescript
+// キャッシュ管理サービス
+export class CacheManager {
+  // 初回取得時
+  async savePreviewCache(url: string, metadata: LinkPreview, source: string): Promise<LinkPreview> {
+    const preview = {
+      url,
+      ...metadata,
+      source,
+      status: this.determineStatus(metadata),
+      fetched_at: new Date(),
+      revalidate_at: new Date(Date.now() + this.getTTL(source)),
+      retry_count: 0
+    }
+    
+    return await supabase.from('link_previews').upsert(preview).single()
+  }
+  
+  // TTL設定（ソース別）
+  private getTTL(source: string): number {
+    const ttlMap = {
+      'edge': 7 * 24 * 60 * 60 * 1000,     // 7日
+      'node': 14 * 24 * 60 * 60 * 1000,    // 14日
+      'external': 30 * 24 * 60 * 60 * 1000, // 30日
+      'failed': 6 * 60 * 60 * 1000         // 6時間（失敗時）
+    }
+    return ttlMap[source] || ttlMap['edge']
+  }
+  
+  // ステータス判定
+  private determineStatus(metadata: LinkPreview): string {
+    if (metadata.title && (metadata.description || metadata.image)) {
+      return 'success'
+    } else if (metadata.title) {
+      return 'partial'
+    } else {
+      return 'failed'
+    }
+  }
+  
+  // 手動再取得
+  async forceRevalidate(url: string): Promise<LinkPreview> {
+    // キャッシュを無視して再取得
+    return await this.metadataService.extractMetadata(url)
+  }
+}
+```
+
+### バックグラウンド再取得（Vercel Cron）
+```typescript
+// app/api/cron/revalidate/route.ts
+export async function GET(request: Request) {
+  // 認証チェック
+  const authHeader = request.headers.get('authorization')
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return new Response('Unauthorized', { status: 401 })
+  }
+  
+  try {
+    // 再取得対象を抽出（上位100件）
+    const expiredPreviews = await supabase
+      .from('link_previews')
+      .select('url, status, retry_count')
+      .lt('revalidate_at', new Date().toISOString())
+      .eq('status', 'success')
+      .order('fetched_at', { ascending: true })
+      .limit(100)
+    
+    const results = []
+    
+    for (const preview of expiredPreviews.data || []) {
+      try {
+        // 指数的バックオフチェック
+        if (preview.status === 'failed' && Math.random() < Math.pow(0.5, preview.retry_count)) {
+          continue
+        }
+        
+        const updated = await metadataService.extractMetadata(preview.url)
+        results.push({ url: preview.url, status: 'updated' })
+        
+        // レートリミットを考慮して遅延
+        await new Promise(resolve => setTimeout(resolve, 100))
+      } catch (error) {
+        results.push({ url: preview.url, status: 'error', error: error.message })
+      }
+    }
+    
+    return Response.json({ 
+      success: true, 
+      processed: results.length,
+      results 
+    })
+  } catch (error) {
+    return Response.json({ error: error.message }, { status: 500 })
+  }
+}
+```
+
+### 手動再取得UI
+```typescript
+// components/bookmarks/refresh-preview-button.tsx
+export function RefreshPreviewButton({ bookmark }: { bookmark: Bookmark }) {
+  const [isLoading, setIsLoading] = useState(false)
+  
+  const handleRefresh = async () => {
+    setIsLoading(true)
+    try {
+      await fetch('/api/bookmarks/refresh-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookmarkId: bookmark.id })
+      })
+      
+      // UI更新
+      router.refresh()
+    } catch (error) {
+      console.error('Preview refresh failed:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+  
+  return (
+    <button onClick={handleRefresh} disabled={isLoading}>
+      {isLoading ? <Spinner /> : <RefreshIcon />}
+      再取得
+    </button>
+  )
+}
+```
+
 ## セキュリティ・パフォーマンス考慮事項
 
-### セキュリティ
-- Supabase Row Level Security (RLS) による認可
-- CSRF 保護（Next.js内蔵）
-- XSS 対策（React の自動エスケープ）
-- URL バリデーション
-- レート制限の実装
+### SSRF/セキュリティ対策
+```typescript
+// lib/security/url-validator.ts
+export class UrlValidator {
+  private static readonly ALLOWED_PROTOCOLS = ['http:', 'https:']
+  private static readonly PRIVATE_IP_RANGES = [
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[01])\./,
+    /^192\.168\./,
+    /^127\./,
+    /^169\.254\./,
+    /^::1$/,
+    /^fc00:/,
+    /^fe80:/
+  ]
+  
+  static validate(url: string): { valid: boolean; error?: string } {
+    try {
+      const parsed = new URL(url)
+      
+      // プロトコルチェック
+      if (!this.ALLOWED_PROTOCOLS.includes(parsed.protocol)) {
+        return { valid: false, error: 'Invalid protocol' }
+      }
+      
+      // プライベートIPチェック
+      if (this.isPrivateIP(parsed.hostname)) {
+        return { valid: false, error: 'Private IP not allowed' }
+      }
+      
+      // ループバックチェック
+      if (parsed.hostname === 'localhost' || parsed.hostname === '0.0.0.0') {
+        return { valid: false, error: 'Loopback not allowed' }
+      }
+      
+      return { valid: true }
+    } catch (error) {
+      return { valid: false, error: 'Invalid URL format' }
+    }
+  }
+  
+  private static isPrivateIP(hostname: string): boolean {
+    return this.PRIVATE_IP_RANGES.some(range => range.test(hostname))
+  }
+}
+```
 
-### パフォーマンス
-- Next.js Server Components による初期レンダリング最適化
-- Virtual scrolling による大量データ表示
-- 画像の遅延読み込み・WebP対応
-- CDN 配信（Vercel Edge Network）
-- データベースクエリ最適化
-- キャッシュ戦略（Redis検討）
+### リクエスト制限とタイムアウト
+```typescript
+// lib/http/safe-fetch.ts
+export async function safeFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  // URLバリデーション
+  const validation = UrlValidator.validate(url)
+  if (!validation.valid) {
+    throw new Error(`URL validation failed: ${validation.error}`)
+  }
+  
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000) // 10秒タイムアウト
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'EncoreMetaBot/1.0',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'ja,en;q=0.9',
+        ...options.headers
+      },
+      // サイズ制限（先靣1-2MBで打ち切り）
+      // Note: 実際はstreamで処理してサイズチェック
+    })
+    
+    // リダイレクト制限（最大5回）
+    if (response.redirected && this.getRedirectCount(response) > 5) {
+      throw new Error('Too many redirects')
+    }
+    
+    return response
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+```
+
+### レートリミット
+```typescript
+// app/api/extract/route.ts
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(10, '1 m'), // 1分間1ユーザーに10リクエスト
+})
+
+export async function GET(request: Request) {
+  const ip = request.headers.get('x-forwarded-for') ?? '127.0.0.1'
+  const { success } = await ratelimit.limit(ip)
+  
+  if (!success) {
+    return new Response('Rate limit exceeded', { status: 429 })
+  }
+  
+  // メタデータ抽出処理...
+}
+```
+
+### パフォーマンス最適化のポイント
+- **Edge First**: 大部分のリクエストはEdgeで完結（低レイテンシ・低コスト）
+- **キャッシュ優先**: DBからの取得を最優先、リクエスト数を抑制
+- **バックグラウンド更新**: ユーザー体験を阻害しない非同期更新
+- **段階的フォールバック**: 必要時のみ高コストAPIを使用
+- **統合キャッシュ**: ユーザー間でキャッシュを共有、重複リクエスト排除
+- **スマート再取得**: 指数的バックオフで失敗リンクの無駄な再試行を抑制
+
+## 実装ミニ仕様（コピペ指針）
+
+### 抽出優先度
+```typescript
+// タイトル優先度
+const title = 
+  $('meta[property="og:title"]').attr('content') ||
+  $('meta[name="twitter:title"]').attr('content') ||
+  $('title').text().trim()
+
+// 説明優先度  
+const description =
+  $('meta[property="og:description"]').attr('content') ||
+  $('meta[name="twitter:description"]').attr('content') ||
+  $('meta[name="description"]').attr('content') ||
+  await extractWithReadability(url) // Nodeのみ
+
+// 画像優先度
+const image =
+  $('meta[property="og:image"]').attr('content') ||
+  $('meta[name="twitter:image"]').attr('content') ||
+  $('meta[name="twitter:image:src"]').attr('content') ||
+  $('link[rel="apple-touch-icon"]').attr('href') ||
+  $('link[rel="icon"]').attr('href')
+```
+
+### 環境変数設定
+```bash
+# 必須
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+
+# Google認証
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+# メタデータ取得
+USE_EXTERNAL_PREVIEW=0  # 1で外部API有効
+MICROLINK_API_KEY=your_microlink_key  # オプション
+
+# Cronセキュリティ
+CRON_SECRET=your_random_cron_secret
+
+# レートリミット（Upstash Redis）
+UPSTASH_REDIS_REST_URL=your_redis_url
+UPSTASH_REDIS_REST_TOKEN=your_redis_token
+```
+
+### データ正規化ルール
+```typescript
+export function normalizeUrl(url: string): string {
+  const urlObj = new URL(url)
+  
+  // トラッキングパラメータ除去
+  const trackingParams = [
+    'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+    'fbclid', 'gclid', 'msclkid', '_ga', 'mc_eid'
+  ]
+  
+  trackingParams.forEach(param => {
+    urlObj.searchParams.delete(param)
+  })
+  
+  // 末尾スラッシュ統一
+  return urlObj.toString().replace(/\/$/, '')
+}
+
+export function makeAbsoluteUrl(href: string, baseUrl: string): string {
+  try {
+    return new URL(href, baseUrl).href
+  } catch {
+    return ''
+  }
+}
+```
+
+### 導入順序（小さく始めて伸ばせる）
+
+#### Phase 1: Edge Only MVP
+1. `/api/extract` EdgeルートのHTMLRewriter実装
+2. `link_previews`テーブル作成
+3. 基本キャッシュ機能
+4. ブックマーク保存時のEdge抽出連携
+
+#### Phase 2: Nodeフォールバック追加
+5. `/api/extract/deep` Nodeルートのmetascraper実装
+6. Readabilityによる本文抜粋機能
+7. Edge→Nodeのフォールバックロジック
+
+#### Phase 3: 外部APIオプション
+8. `/api/extract/external`ルート実装
+9. Microlink API連携
+10. 環境変数で有効/無効切り替え
+
+#### Phase 4: 運用機能
+11. Vercel Cronでのバックグラウンド再取得
+12. 手動再取得ボタン
+13. レートリミット実装
+14. メトリクスとモニタリング
+
+### デバッグ情報保存
+- `source`フィールドでどの段階で抽出できたか記録
+- `status`で成功/部分成功/失敗を区別
+- `retry_count`で再試行回数を記録
+- `error_message`で失敗理由を保存
