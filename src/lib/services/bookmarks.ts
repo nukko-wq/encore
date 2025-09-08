@@ -1,9 +1,11 @@
-import { createClient } from '@/lib/supabase-server'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase-server'
 import type {
   Bookmark,
   BookmarkFilters,
+  BookmarkSearchResult,
   CreateBookmarkData,
+  PaginationOptions,
   UpdateBookmarkData,
 } from '@/types/database'
 
@@ -12,38 +14,77 @@ export class BookmarkService {
    * ブックマーク一覧取得
    * RLSポリシーにより自動でユーザーのデータのみ取得
    */
-  async getBookmarks(filters?: BookmarkFilters): Promise<Bookmark[]> {
+  async getBookmarks(
+    filters?: BookmarkFilters,
+    pagination?: PaginationOptions,
+  ): Promise<BookmarkSearchResult> {
     const supabase = await this.getClient()
 
-    let query = supabase
+    // デフォルト値設定
+    const page = pagination?.page ?? 1
+    const limit = Math.min(pagination?.limit ?? 20, 100) // 最大100件に制限
+    const sortBy = pagination?.sort_by ?? 'created_at'
+    const sortOrder = pagination?.sort_order ?? 'desc'
+    const offset = (page - 1) * limit
+
+    // 総件数取得用クエリ
+    let countQuery = supabase
+      .from('bookmarks')
+      .select('*', { count: 'exact', head: true })
+
+    // データ取得用クエリ
+    let dataQuery = supabase
       .from('bookmarks')
       .select('*')
-      .order('created_at', { ascending: false })
+      .order(sortBy, { ascending: sortOrder === 'asc' })
+      .range(offset, offset + limit - 1)
 
-    // フィルタ適用
-    if (filters?.status) {
-      if (Array.isArray(filters.status)) {
-        query = query.in('status', filters.status)
-      } else {
-        query = query.eq('status', filters.status)
+    // フィルタ適用（両クエリに同じフィルタを適用）
+    const applyFilters = (query: any) => {
+      if (filters?.status) {
+        if (Array.isArray(filters.status)) {
+          query = query.in('status', filters.status)
+        } else {
+          query = query.eq('status', filters.status)
+        }
       }
+
+      if (filters?.is_favorite !== undefined) {
+        query = query.eq('is_favorite', filters.is_favorite)
+      }
+
+      if (filters?.is_pinned !== undefined) {
+        query = query.eq('is_pinned', filters.is_pinned)
+      }
+
+      return query
     }
 
-    if (filters?.is_favorite !== undefined) {
-      query = query.eq('is_favorite', filters.is_favorite)
+    countQuery = applyFilters(countQuery)
+    dataQuery = applyFilters(dataQuery)
+
+    // 並行実行で総件数とデータを取得
+    const [countResult, dataResult] = await Promise.all([countQuery, dataQuery])
+
+    if (countResult.error) {
+      throw new Error(`Failed to count bookmarks: ${countResult.error.message}`)
     }
 
-    if (filters?.is_pinned !== undefined) {
-      query = query.eq('is_pinned', filters.is_pinned)
+    if (dataResult.error) {
+      throw new Error(`Failed to fetch bookmarks: ${dataResult.error.message}`)
     }
 
-    const { data, error } = await query
+    const total = countResult.count ?? 0
+    const bookmarks = dataResult.data || []
 
-    if (error) {
-      throw new Error(`Failed to fetch bookmarks: ${error.message}`)
+    return {
+      bookmarks,
+      total,
+      page,
+      limit,
+      has_next: offset + limit < total,
+      has_prev: page > 1,
     }
-
-    return data || []
   }
 
   /**
@@ -282,8 +323,8 @@ export class BookmarkService {
       )
       // HTMLタグを除去
       .replace(/<[^>]*>/g, '')
-      // 制御文字を除去（RegExpコンストラクタ使用）
-      .replace(new RegExp('[\\x00-\\x1F\\x7F-\\x9F]', 'g'), '')
+      // 制御文字を除去
+      .replace(/[\p{Cc}\p{Cf}]/gu, '')
       // 複数の空白を単一スペースに
       .replace(/\s+/g, ' ')
       .trim()
@@ -362,7 +403,7 @@ export class BookmarkService {
     if (!cachedClient) {
       throw new Error('Failed to retrieve cached Supabase client')
     }
-    
+
     return cachedClient
   }
 }
