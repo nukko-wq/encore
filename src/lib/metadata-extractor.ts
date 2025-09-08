@@ -93,114 +93,151 @@ export async function extractMetadataFromHtml(
 
 /**
  * 高品質画像選択（HTTPS優先、解像度優先）
+ * OGP複数対応、Twitter別名義、レガシー候補、サイズ推定、SVG/ロゴ減点を含む改良版
  */
-function selectBestImage($: cheerio.CheerioAPI, _baseUrl: string): string {
-  const candidates: Array<{
+function selectBestImage($: cheerio.CheerioAPI, baseUrl: string): string {
+  type Cand = {
     url: string
     width?: number
     height?: number
     priority: number
     isSecure: boolean
-  }> = []
-
-  // 1. OG画像（secure_url優先、サイズ情報付き）
-  const ogImage = $('meta[property="og:image"]').attr('content')
-  const ogImageSecure = $('meta[property="og:image:secure_url"]').attr(
-    'content',
-  )
-  const ogImageWidth = parseInt(
-    $('meta[property="og:image:width"]').attr('content') || '0',
-    10,
-  )
-  const ogImageHeight = parseInt(
-    $('meta[property="og:image:height"]').attr('content') || '0',
-    10,
-  )
-
-  if (ogImageSecure) {
-    candidates.push({
-      url: ogImageSecure,
-      width: ogImageWidth || undefined,
-      height: ogImageHeight || undefined,
-      priority: 100, // 最高優先度（secure + OG）
-      isSecure: true,
-    })
-  } else if (ogImage) {
-    candidates.push({
-      url: ogImage,
-      width: ogImageWidth || undefined,
-      height: ogImageHeight || undefined,
-      priority: 90, // 高優先度（OG）
-      isSecure: ogImage.startsWith('https:'),
+    penalty?: number
+  }
+  const c: Cand[] = []
+  const push = (
+    url?: string | null,
+    priority = 50,
+    width?: number,
+    height?: number,
+  ) => {
+    if (!url) return
+    c.push({
+      url,
+      width,
+      height,
+      priority,
+      isSecure: url.startsWith('https:'),
+      penalty: 0,
     })
   }
 
-  // 2. Twitter画像
-  const twitterImage = $('meta[name="twitter:image"]').attr('content')
-  if (twitterImage) {
-    candidates.push({
-      url: twitterImage,
-      priority: 80, // 中高優先度
-      isSecure: twitterImage.startsWith('https:'),
-    })
-  }
-
-  // 3. Apple touch icon（高解像度）
-  $('link[rel="apple-touch-icon"]').each((_, elem) => {
-    const href = $(elem).attr('href')
-    const sizes = $(elem).attr('sizes')
-    if (href) {
-      let size = 0
-      if (sizes) {
-        const match = sizes.match(/(\d+)x(\d+)/)
-        if (match) {
-          size = parseInt(match[1], 10)
-        }
+  // サイズ推定（ファイル名やクエリから）
+  const inferSize = (u?: string) => {
+    if (!u)
+      return {
+        w: undefined as number | undefined,
+        h: undefined as number | undefined,
       }
+    const m = u.match(/(^|[^0-9])(\d{2,4})x(\d{2,4})([^0-9]|$)/)
+    let w = m ? parseInt(m[2], 10) : undefined
+    let h = m ? parseInt(m[3], 10) : undefined
+    try {
+      const q = new URL(u, baseUrl).searchParams
+      const wStr = q.get('w') || q.get('width') || q.get('maxwidth')
+      const hStr = q.get('h') || q.get('height') || q.get('maxheight')
+      w = w ?? (wStr ? parseInt(wStr, 10) : undefined)
+      h = h ?? (hStr ? parseInt(hStr, 10) : undefined)
+    } catch {}
+    return { w, h }
+  }
 
-      candidates.push({
-        url: href,
-        width: size || undefined,
-        height: size || undefined,
-        priority: 70, // 中優先度
-        isSecure: href.startsWith('https:'),
-      })
+  // --- OGP 複数対応（順序を保ってグルーピング）
+  type OgGroup = {
+    url?: string
+    secure?: string
+    width?: number
+    height?: number
+  }
+  const groups: OgGroup[] = []
+  let cur: OgGroup | null = null
+  $('meta[property^="og:image"]').each((_, el) => {
+    const prop = $(el).attr('property') || ''
+    const content = $(el).attr('content') || ''
+    if (prop === 'og:image' || prop === 'og:image:url') {
+      if (cur) groups.push(cur)
+      cur = { url: content }
+    } else if (prop === 'og:image:secure_url') {
+      cur = cur ?? {}
+      cur.secure = content
+    } else if (prop === 'og:image:width') {
+      cur = cur ?? {}
+      cur.width = parseInt(content, 10) || undefined
+    } else if (prop === 'og:image:height') {
+      cur = cur ?? {}
+      cur.height = parseInt(content, 10) || undefined
     }
   })
+  if (cur) groups.push(cur)
+  groups.forEach((g) => {
+    const u = g.secure || g.url
+    const hint = inferSize(u)
+    push(u, g.secure ? 100 : 90, g.width ?? hint.w, g.height ?? hint.h)
+  })
 
-  // 候補のフィルタリング・ソート
-  const filtered = candidates
-    .filter((candidate) => {
-      // data:スキーム除外
-      if (candidate.url.startsWith('data:')) return false
+  // --- Twitter いろいろ
+  ;[
+    'meta[name="twitter:image:src"]',
+    'meta[name="twitter:image"]',
+    'meta[property="twitter:image"]',
+  ].forEach((sel) => {
+    $(sel).each((_, el) => {
+      const u = $(el).attr('content')
+      const hint = inferSize(u || undefined)
+      push(u, 80, hint.w, hint.h)
+    })
+  })
 
-      // 明らかに小さすぎる画像は除外
-      if (candidate.width && candidate.width < 16) return false
-      if (candidate.height && candidate.height < 16) return false
+  // --- レガシー/追加候補
+  push($('link[rel="image_src"]').attr('href') || undefined, 75)
+  $('meta[itemprop="image"], meta[name="thumbnail"]').each((_, el) =>
+    push($(el).attr('content'), 75),
+  )
+  $('link[rel="preload"][as="image"]').each((_, el) =>
+    push($(el).attr('href'), 70),
+  )
 
+  // --- Apple touch icon（フォールバック・既定152）
+  $('link[rel~="apple-touch-icon"]').each((_, el) => {
+    const href = $(el).attr('href')
+    const sizes = $(el).attr('sizes')
+    let size = 152
+    if (sizes && sizes !== 'any') {
+      const m = sizes.match(/(\d+)x(\d+)/)
+      if (m) size = parseInt(m[1], 10)
+    }
+    push(href, 70, size, size)
+  })
+
+  // 後処理（除外・減点・ユニーク化）
+  const seen = new Set<string>()
+  const filtered = c
+    .filter(
+      (v) =>
+        v.url &&
+        !v.url.startsWith('data:') &&
+        !v.url.startsWith('blob:') &&
+        !/\.svg($|\?)/i.test(v.url), // プレビュー用はラスタ優先
+    )
+    .map((v) => ({
+      ...v,
+      penalty: /logo|sprite|placeholder/i.test(v.url) ? 5 : 0,
+    }))
+    .filter((v) => {
+      if (seen.has(v.url)) return false
+      seen.add(v.url)
       return true
     })
-    .sort((a, b) => {
-      // 1. セキュリティ（HTTPS）優先
-      if (a.isSecure !== b.isSecure) {
-        return b.isSecure ? 1 : -1
-      }
 
-      // 2. 優先度
-      if (a.priority !== b.priority) {
-        return b.priority - a.priority
-      }
-
-      // 3. サイズ（大きいほうが高品質）
-      const aSize = (a.width || 0) * (a.height || 0)
-      const bSize = (b.width || 0) * (b.height || 0)
-
-      if (aSize !== bSize) {
-        return bSize - aSize
-      }
-
-      return 0
-    })
+  // ソート：HTTPS > 優先度 > 面積 > 減点（小さいほど良い）
+  filtered.sort((a, b) => {
+    if (a.isSecure !== b.isSecure) return a.isSecure ? -1 : 1
+    if (a.priority !== b.priority) return b.priority - a.priority
+    const aArea = (a.width || 0) * (a.height || 0)
+    const bArea = (b.width || 0) * (b.height || 0)
+    if (aArea !== bArea) return bArea - aArea
+    return (a.penalty || 0) - (b.penalty || 0)
+  })
 
   return filtered[0]?.url || ''
 }
