@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { createClient, checkUserInWhitelist } from '@/lib/supabase-server'
+import { checkUserInWhitelist, createClient } from '@/lib/supabase-server'
 
 export default async function Home() {
   // サーバーサイドで認証状態をチェック
