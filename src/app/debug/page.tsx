@@ -1,8 +1,10 @@
 import {
+  checkUserInWhitelist,
   createClient,
   createServiceRoleClient,
-  checkUserInWhitelist,
 } from '@/lib/supabase-server'
+
+export const dynamic = 'force-dynamic'
 
 export default async function DebugPage() {
   const supabase = await createClient()

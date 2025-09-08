@@ -1,6 +1,5 @@
-import { type CookieOptions, createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
+import { createServiceRoleClient } from '@/lib/supabase-server'
 
 // ホワイトリストにメールアドレスを追加する（開発用）
 export async function POST(request: NextRequest) {
@@ -11,31 +10,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 })
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('Missing Supabase environment variables in API route')
-      return NextResponse.json(
-        { error: 'Configuration error' },
-        { status: 500 },
-      )
-    }
-
-    const cookieStore = await cookies()
-    const supabase = createServerClient(supabaseUrl, supabaseKey, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          cookieStore.set({ name, value, ...options })
-        },
-        remove(name: string, options: CookieOptions) {
-          cookieStore.set({ name, value: '', ...options })
-        },
-      },
-    })
+    // 管理者権限でサービスロールクライアント使用
+    const supabase = createServiceRoleClient()
 
     const { data, error } = await supabase
       .from('allowed_emails')
@@ -64,31 +40,8 @@ export async function POST(request: NextRequest) {
 // ホワイトリストのメールアドレス一覧を取得
 export async function GET() {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('Missing Supabase environment variables in API route')
-      return NextResponse.json(
-        { error: 'Configuration error' },
-        { status: 500 },
-      )
-    }
-
-    const cookieStore = await cookies()
-    const supabase = createServerClient(supabaseUrl, supabaseKey, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          cookieStore.set({ name, value, ...options })
-        },
-        remove(name: string, options: CookieOptions) {
-          cookieStore.set({ name, value: '', ...options })
-        },
-      },
-    })
+    // 管理者権限でサービスロールクライアント使用
+    const supabase = createServiceRoleClient()
 
     const { data, error } = await supabase
       .from('allowed_emails')

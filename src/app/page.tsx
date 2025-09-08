@@ -1,77 +1,8 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
-import { createClient, checkUserInWhitelist } from '@/lib/supabase-server'
 
 export default async function Home() {
-  // サーバーサイドで認証状態をチェック（最適化されたヘルパー関数を使用）
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  console.log('🔵 Home page auth check:', {
-    hasUser: !!user,
-    userEmail: user?.email || 'none',
-    authError: authError?.message || 'no error',
-  })
-
-  // 既にログインしている場合はダッシュボードにリダイレクト
-  if (user?.email) {
-    console.log(`🔵 User ${user.email} found, checking whitelist...`)
-
-    try {
-      // ホワイトリストチェック（RLS対応のサービスロールクライアント使用）
-      const {
-        isAllowed,
-        data: allowedEmail,
-        error: whitelistError,
-      } = await checkUserInWhitelist(user.email)
-
-      console.log('🔵 Whitelist check result:', {
-        isAllowed,
-        allowedEmail: allowedEmail ? 'found' : 'not found',
-        email: user.email,
-        emailLength: user.email.length,
-        whitelistError: whitelistError ? String(whitelistError) : 'no error',
-      })
-
-      // メールアドレスの詳細分析
-      console.log('🔍 Email analysis:', {
-        email: user.email,
-        trimmed: user.email.trim(),
-        lowercase: user.email.toLowerCase(),
-        bytes: Buffer.from(user.email, 'utf8').length,
-        charCodes: user.email.split('').map((c) => c.charCodeAt(0)),
-      })
-
-      if (isAllowed && allowedEmail) {
-        console.log(
-          `🔵 User ${user.email} is whitelisted, redirecting to dashboard`,
-        )
-        redirect('/dashboard')
-      } else if (whitelistError) {
-        console.error(
-          `❌ Whitelist query failed for ${user.email}:`,
-          whitelistError,
-        )
-
-        // エラー時はサインアウトして再認証を促す
-        await supabase.auth.signOut()
-      } else {
-        console.log(
-          `❌ User ${user.email} not in whitelist, staying on home page`,
-        )
-        // ホワイトリストに登録されていない場合はサインアウト
-        await supabase.auth.signOut()
-      }
-    } catch (error) {
-      console.error('💥 Unexpected error during whitelist check:', error)
-      // 予期しないエラーの場合もサインアウト
-      await supabase.auth.signOut()
-    }
-  }
+  // ホームページは認証状態に関わらず表示
+  // 認証済みユーザーのリダイレクトは必要に応じてクライアントサイドで処理
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
@@ -117,6 +48,7 @@ export default async function Home() {
                   className="h-4 w-4 text-green-500 mr-2"
                   fill="currentColor"
                   viewBox="0 0 20 20"
+                  aria-label="チェックマーク"
                 >
                   <path
                     fillRule="evenodd"
@@ -131,6 +63,7 @@ export default async function Home() {
                   className="h-4 w-4 text-green-500 mr-2"
                   fill="currentColor"
                   viewBox="0 0 20 20"
+                  aria-label="チェックマーク"
                 >
                   <path
                     fillRule="evenodd"
@@ -145,6 +78,7 @@ export default async function Home() {
                   className="h-4 w-4 text-green-500 mr-2"
                   fill="currentColor"
                   viewBox="0 0 20 20"
+                  aria-label="チェックマーク"
                 >
                   <path
                     fillRule="evenodd"
@@ -159,6 +93,7 @@ export default async function Home() {
                   className="h-4 w-4 text-green-500 mr-2"
                   fill="currentColor"
                   viewBox="0 0 20 20"
+                  aria-label="チェックマーク"
                 >
                   <path
                     fillRule="evenodd"

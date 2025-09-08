@@ -46,10 +46,13 @@ export async function createClient() {
           cookiesToSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options)
           })
-        } catch (error) {
+        } catch (_error) {
           // サーバーコンポーネント内ではcookieを設定できない場合がある
           // middlewareでセッションリフレッシュされる場合は無視できる
-          console.error('Failed to set cookies:', error)
+          // 本番環境では警告レベルに下げる
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('Cookie setting skipped in server component context')
+          }
         }
       },
     },

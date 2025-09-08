@@ -1,6 +1,5 @@
-import { type CookieOptions, createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
+import { checkUserInWhitelist, createClient } from '@/lib/supabase-server'
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
@@ -23,34 +22,8 @@ export async function GET(request: NextRequest) {
   }
 
   if (code) {
-    const cookieStore = await cookies()
-
-    // 環境変数の確認
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-    // 環境変数設定の確認（機密情報を含まない）
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('Missing Supabase environment variables')
-      return NextResponse.redirect(`${origin}/error?message=config_error`)
-    }
-
-    const supabase = createServerClient(supabaseUrl, supabaseKey, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          cookieStore.set({ name, value, ...options })
-        },
-        remove(name: string, options: CookieOptions) {
-          cookieStore.set({ name, value: '', ...options })
-        },
-      },
-    })
-
     try {
+      const supabase = await createClient()
       const {
         data: { session },
         error,
@@ -67,13 +40,11 @@ export async function GET(request: NextRequest) {
       }
 
       // サーバーサイドでホワイトリストチェック
-      const { data: allowedEmail, error: whitelistError } = await supabase
-        .from('allowed_emails')
-        .select('email')
-        .eq('email', session.user.email)
-        .single()
+      const { isAllowed, error: whitelistError } = await checkUserInWhitelist(
+        session.user.email,
+      )
 
-      if (whitelistError || !allowedEmail) {
+      if (whitelistError || !isAllowed) {
         console.error(`Access denied for email: ${session.user.email}`)
         // 許可されていないユーザーはサインアウト
         await supabase.auth.signOut()

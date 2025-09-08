@@ -88,29 +88,7 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    // ホワイトリストチェック（サーバーサイドで実行）
-    if (user?.email) {
-      const { data: allowedEmail, error } = await supabase
-        .from('allowed_emails')
-        .select('email')
-        .eq('email', user.email)
-        .single()
-
-      if (error || !allowedEmail) {
-        console.log(`Access denied for email: ${user.email}`)
-
-        // サインアウト処理
-        await supabase.auth.signOut()
-
-        if (isApiRoute) {
-          return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-        } else {
-          return NextResponse.redirect(
-            new URL('/error?message=unauthorized', request.url),
-          )
-        }
-      }
-    }
+    // ユーザーが認証済みでホワイトリストチェックは callbackルート で実行済み
 
     return response
   }
