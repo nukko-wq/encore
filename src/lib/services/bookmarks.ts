@@ -240,7 +240,9 @@ export class BookmarkService {
   }> {
     try {
       // 動的インポートでメタデータ抽出処理を実行
-      const { extractMetadataFromHtml } = await import('@/lib/metadata-extractor')
+      const { extractMetadataFromHtml } = await import(
+        '@/lib/metadata-extractor'
+      )
       const result = await extractMetadataFromHtml(url)
 
       return {

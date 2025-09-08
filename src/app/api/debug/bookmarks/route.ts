@@ -4,18 +4,25 @@
  */
 
 import { NextResponse } from 'next/server'
-import { createClient, createServiceRoleClient, getCurrentUser } from '@/lib/supabase-server'
+import {
+  createClient,
+  createServiceRoleClient,
+  getCurrentUser,
+} from '@/lib/supabase-server'
 
 export async function GET() {
   try {
     const user = await getCurrentUser()
-    
-    console.log('🔍 Debug bookmarks - User:', user ? { id: user.id, email: user.email } : null)
+
+    console.log(
+      '🔍 Debug bookmarks - User:',
+      user ? { id: user.id, email: user.email } : null,
+    )
 
     if (!user) {
       return NextResponse.json(
         { error: 'User not authenticated' },
-        { status: 401 }
+        { status: 401 },
       )
     }
 
@@ -35,14 +42,8 @@ export async function GET() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
-    // 3. ホワイトリスト確認
-    const { data: whitelistCheck, error: whitelistError } = await serviceClient
-      .from('allowed_emails')
-      .select('email')
-      .eq('email', user.email)
-      .single()
+    // 3. 認証情報確認
 
-    // 4. 認証情報確認
     const { data: authData, error: authError } = await supabase.auth.getUser()
 
     return NextResponse.json({
@@ -54,30 +55,30 @@ export async function GET() {
       authentication: {
         isAuthenticated: !!authData.user,
         authError: authError?.message,
-        sessionUser: authData.user ? {
-          id: authData.user.id,
-          email: authData.user.email,
-        } : null,
+        sessionUser: authData.user
+          ? {
+              id: authData.user.id,
+              email: authData.user.email,
+            }
+          : null,
       },
-      whitelist: {
-        isWhitelisted: !!whitelistCheck,
-        whitelistError: whitelistError?.message,
-        userEntry: whitelistCheck,
-      },
+      // whitelist checking removed - already authenticated users passed login whitelist check
       bookmarks: {
         rlsCount: rlsBookmarks?.length || 0,
         rlsError: rlsError?.message,
         rlsBookmarks: rlsBookmarks?.slice(0, 3) || [], // 最初の3件のみ表示
-        
+
         serviceCount: allBookmarks?.length || 0,
         serviceError: serviceError?.message,
         serviceBookmarks: allBookmarks?.slice(0, 3) || [], // 最初の3件のみ表示
       },
       rlsAnalysis: {
-        userIdMatches: allBookmarks?.filter(b => b.user_id === user.id).length || 0,
-        differentUserBookmarks: allBookmarks?.filter(b => b.user_id !== user.id).length || 0,
+        userIdMatches:
+          allBookmarks?.filter((b) => b.user_id === user.id).length || 0,
+        differentUserBookmarks:
+          allBookmarks?.filter((b) => b.user_id !== user.id).length || 0,
         rlsEffective: (rlsBookmarks?.length || 0) < (allBookmarks?.length || 0),
-      }
+      },
     })
   } catch (error) {
     console.error('Debug bookmarks error:', error)
@@ -86,7 +87,7 @@ export async function GET() {
         error: 'Internal server error',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }
