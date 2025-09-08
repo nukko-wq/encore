@@ -1,13 +1,10 @@
 import Link from 'next/link'
 import SignOutButton from '@/components/sign-out-button'
-import { createClient } from '@/lib/supabase-server'
+import { getCurrentUser } from '@/lib/supabase-server'
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // middlewareで既に認証確認済みのため、getCurrentUserを使用
+  const user = await getCurrentUser()
 
   return (
     <div className="min-h-screen bg-gray-50">

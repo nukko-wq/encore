@@ -1,13 +1,11 @@
 import Link from 'next/link'
 import SignOutButton from '@/components/sign-out-button'
-import { createClient } from '@/lib/supabase-server'
+import { createClient, getCurrentUser } from '@/lib/supabase-server'
 
 export default async function BookmarksPage() {
+  // middlewareで既に認証確認済みのため、getCurrentUserを使用
+  const user = await getCurrentUser()
   const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
 
   // ユーザーのブックマークを取得（RLSによりユーザー自身のものだけ取得される）
   const { data: bookmarks, error } = await supabase

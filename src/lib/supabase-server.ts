@@ -102,11 +102,12 @@ async function getAuthenticatedUser() {
 }
 
 // 認証必須のサーバーコンポーネント用
+// 注意: 現在はmiddleware.tsが認証保護を担当しているため、この関数は通常使用されません
 export async function requireAuth() {
   const { user, error, supabase } = await getAuthenticatedUser()
 
   if (!user || error) {
-    redirect('/auth/signin')
+    redirect('/login')
   }
 
   return { user, supabase }

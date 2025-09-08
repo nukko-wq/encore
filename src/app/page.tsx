@@ -1,8 +1,38 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { createClient, checkUserInWhitelist } from '@/lib/supabase-server'
 
 export default async function Home() {
-  // ホームページは認証状態に関わらず表示
-  // 認証済みユーザーのリダイレクトは必要に応じてクライアントサイドで処理
+  // サーバーサイドで認証状態をチェック
+  const supabase = await createClient()
+  
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    // 既にログインしているユーザーの処理
+    if (user?.email) {
+      // ホワイトリストチェック
+      const { isAllowed, error: whitelistError } = await checkUserInWhitelist(user.email)
+
+      if (isAllowed && !whitelistError) {
+        redirect('/dashboard')
+      }
+      // ホワイトリストにない場合はエラーページへリダイレクト
+      if (!isAllowed) {
+        redirect('/error?message=unauthorized')
+      }
+    }
+  } catch (error) {
+    // redirect() 例外は再スロー（正常な処理）
+    if (error && typeof error === 'object' && 'digest' in error) {
+      throw error
+    }
+    // その他のエラーの場合はログ出力して継続
+    console.error('Auth check error:', error)
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
