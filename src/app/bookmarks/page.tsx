@@ -1,20 +1,24 @@
 import Link from 'next/link'
 import SignOutButton from '@/components/sign-out-button'
-import { createClient, getCurrentUser } from '@/lib/supabase-server'
+import BookmarkForm from '@/components/bookmark-form'
+import { getCurrentUser } from '@/lib/supabase-server'
+import { bookmarkService } from '@/lib/services/bookmarks'
+import type { Bookmark } from '@/types/database'
 
 export default async function BookmarksPage() {
   // middlewareで既に認証確認済みのため、getCurrentUserを使用
   const user = await getCurrentUser()
-  const supabase = await createClient()
 
-  // ユーザーのブックマークを取得（RLSによりユーザー自身のものだけ取得される）
-  const { data: bookmarks, error } = await supabase
-    .from('bookmarks')
-    .select('*')
-    .order('created_at', { ascending: false })
+  // BookmarkServiceを使用してブックマーク取得
+  let bookmarks: Bookmark[] = []
+  let error: string | null = null
 
-  if (error) {
-    console.error('Error fetching bookmarks:', error)
+  try {
+    bookmarks = await bookmarkService.getBookmarks()
+  } catch (err) {
+    console.error('Error fetching bookmarks:', err)
+    error =
+      err instanceof Error ? err.message : 'ブックマークの取得に失敗しました'
   }
 
   return (
@@ -56,11 +60,21 @@ export default async function BookmarksPage() {
       <main>
         <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
           <div className="px-4 py-6 sm:px-0">
-            <div className="mb-6">
+            <div className="mb-8">
               <h1 className="text-2xl font-bold text-gray-900">ブックマーク</h1>
               <p className="mt-1 text-sm text-gray-600">
                 保存したページとリンクを管理します
               </p>
+            </div>
+
+            {/* ブックマーク追加フォーム */}
+            <div className="mb-8 bg-white shadow rounded-lg">
+              <div className="px-4 py-5 sm:p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">
+                  新しいブックマークを追加
+                </h3>
+                <BookmarkForm />
+              </div>
             </div>
 
             {error && (

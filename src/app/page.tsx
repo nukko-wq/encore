@@ -5,7 +5,7 @@ import { createClient, checkUserInWhitelist } from '@/lib/supabase-server'
 export default async function Home() {
   // サーバーサイドで認証状態をチェック
   const supabase = await createClient()
-  
+
   try {
     const {
       data: { user },
@@ -14,7 +14,9 @@ export default async function Home() {
     // 既にログインしているユーザーの処理
     if (user?.email) {
       // ホワイトリストチェック
-      const { isAllowed, error: whitelistError } = await checkUserInWhitelist(user.email)
+      const { isAllowed, error: whitelistError } = await checkUserInWhitelist(
+        user.email,
+      )
 
       if (isAllowed && !whitelistError) {
         redirect('/dashboard')
