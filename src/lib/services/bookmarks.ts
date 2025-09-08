@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createClient, createServiceRoleClient } from '@/lib/supabase-server'
+import { createClient } from '@/lib/supabase-server'
 import { normalizeUrl } from '@/lib/url-normalization'
 import type {
   Bookmark,
@@ -13,41 +13,13 @@ import type {
 export class BookmarkService {
   /**
    * ブックマーク一覧取得
-   * RLSポリシーにより自動でユーザーのデータのみ取得
+   * 認証済みユーザーのuser_idベースRLSにより自動でユーザーのデータのみ取得
    */
   async getBookmarks(
     filters?: BookmarkFilters,
     pagination?: PaginationOptions,
   ): Promise<BookmarkSearchResult> {
     const supabase = await this.getClient()
-
-    // デバッグ: 認証状態確認
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-    console.log('🔍 BookmarkService.getBookmarks - 認証状態:', {
-      user: user
-        ? { id: user.id, email: user.email, created_at: user.created_at }
-        : null,
-      authError: authError?.message,
-    })
-
-    // デバッグ: ホワイトリスト確認
-    if (user?.email) {
-      const { data: allowedEmail, error: whitelistError } = await supabase
-        .from('allowed_emails')
-        .select('email')
-        .eq('email', user.email)
-        .single()
-
-      console.log('🔍 BookmarkService.getBookmarks - ホワイトリスト状況:', {
-        userEmail: user.email,
-        isWhitelisted: !!allowedEmail,
-        whitelistError: whitelistError?.message,
-        whitelistData: allowedEmail,
-      })
-    }
 
     // デフォルト値設定
     const page = pagination?.page ?? 1
@@ -95,93 +67,16 @@ export class BookmarkService {
     // 並行実行で総件数とデータを取得
     const [countResult, dataResult] = await Promise.all([countQuery, dataQuery])
 
-    // デバッグ: クエリ結果確認
-    console.log('🔍 BookmarkService.getBookmarks - クエリ結果:', {
-      countResult: {
-        data: countResult.count,
-        error: countResult.error?.message,
-        status: countResult.status,
-        statusText: countResult.statusText,
-      },
-      dataResult: {
-        dataLength: dataResult.data?.length,
-        error: dataResult.error?.message,
-        status: dataResult.status,
-        statusText: dataResult.statusText,
-      },
-      filters,
-      pagination: { page, limit, sortBy, sortOrder },
-    })
-
     if (countResult.error) {
-      console.error('❌ Count query error:', countResult.error)
       throw new Error(`Failed to count bookmarks: ${countResult.error.message}`)
+    }
+
+    if (dataResult.error) {
+      throw new Error(`Failed to fetch bookmarks: ${dataResult.error.message}`)
     }
 
     const total = countResult.count ?? 0
     const bookmarks = dataResult.data || []
-
-    // RLSエラーの場合、サービスロールクライアントで再試行
-    if (dataResult.error || bookmarks.length === 0) {
-      console.warn('⚠️ RLS query failed, attempting service role client fallback')
-      
-      const serviceClient = createServiceRoleClient()
-      
-      // サービスロールクライアントで再試行（user_idで明示的にフィルタ）
-      const [fallbackCountResult, fallbackDataResult] = await Promise.all([
-        serviceClient
-          .from('bookmarks')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user?.id),
-        serviceClient
-          .from('bookmarks')
-          .select('*')
-          .eq('user_id', user?.id)
-          .order(sortBy, { ascending: sortOrder === 'asc' })
-          .range(offset, offset + limit - 1)
-      ])
-
-      console.log('🔄 Service role fallback results:', {
-        fallbackCount: fallbackCountResult.count,
-        fallbackData: fallbackDataResult.data?.length,
-        fallbackErrors: {
-          count: fallbackCountResult.error?.message,
-          data: fallbackDataResult.error?.message,
-        }
-      })
-
-      if (!fallbackDataResult.error && fallbackDataResult.data) {
-        const fallbackTotal = fallbackCountResult.count ?? 0
-        const fallbackBookmarks = fallbackDataResult.data || []
-
-        console.log('✅ Service role fallback successful:', {
-          totalBookmarks: fallbackTotal,
-          returnedBookmarks: fallbackBookmarks.length,
-        })
-
-        return {
-          bookmarks: fallbackBookmarks,
-          total: fallbackTotal,
-          page,
-          limit,
-          has_next: offset + limit < fallbackTotal,
-          has_prev: page > 1,
-        }
-      }
-    }
-
-    // 通常のRLSクエリが成功した場合
-    if (dataResult.error) {
-      console.error('❌ Data query error:', dataResult.error)
-      throw new Error(`Failed to fetch bookmarks: ${dataResult.error.message}`)
-    }
-
-    console.log('✅ BookmarkService.getBookmarks - 通常RLS結果:', {
-      totalBookmarks: total,
-      returnedBookmarks: bookmarks.length,
-      page,
-      limit,
-    })
 
     return {
       bookmarks,
@@ -195,7 +90,7 @@ export class BookmarkService {
 
   /**
    * ブックマーク作成
-   * RLSポリシーにより自動でホワイトリスト＆所有者チェック
+   * 認証済みユーザーのuser_idベースRLSにより自動でアクセス制御
    */
   async createBookmark(data: {
     url: string
@@ -244,7 +139,7 @@ export class BookmarkService {
       status: 'unread',
     }
 
-    // RLSポリシーでホワイトリスト＆所有者チェックが自動実行
+    // RLSポリシーで認証済みユーザーの所有者チェックが自動実行
     const { data: bookmark, error } = await supabase
       .from('bookmarks')
       .insert({
@@ -275,7 +170,7 @@ export class BookmarkService {
   ): Promise<Bookmark> {
     const supabase = await this.getClient()
 
-    // RLSポリシーにより自動で所有者チェック
+    // RLSポリシーにより認証済みユーザーの自動所有者チェック
     const { data, error } = await supabase
       .from('bookmarks')
       .update({
@@ -299,7 +194,7 @@ export class BookmarkService {
   async deleteBookmark(id: string): Promise<void> {
     const supabase = await this.getClient()
 
-    // RLSポリシーにより自動で所有者チェック
+    // RLSポリシーにより認証済みユーザーの自動所有者チェック
     const { error } = await supabase.from('bookmarks').delete().eq('id', id)
 
     if (error) {
