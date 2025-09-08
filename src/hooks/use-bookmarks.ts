@@ -10,7 +10,7 @@ export interface BookmarkFilters {
   search?: string
 }
 
-export function useBookmarks() {
+export function useBookmarks(filters?: BookmarkFilters) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -19,9 +19,26 @@ export function useBookmarks() {
   const fetchBookmarks = useCallback(async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/bookmarks')
+
+      // URLパラメータ構築
+      const params = new URLSearchParams()
+      if (filters?.status) params.append('status', filters.status)
+      if (filters?.is_favorite !== undefined)
+        params.append('is_favorite', String(filters.is_favorite))
+      if (filters?.is_pinned !== undefined)
+        params.append('is_pinned', String(filters.is_pinned))
+      if (filters?.search) params.append('search', filters.search)
+      if (filters?.tags?.length) {
+        for (const tag of filters.tags) {
+          params.append('tags', tag)
+        }
+      }
+
+      const url = `/api/bookmarks${params.toString() ? `?${params.toString()}` : ''}`
+      const response = await fetch(url)
+
       if (!response.ok) {
-        throw new Error('Failed to fetch bookmarks')
+        throw new Error('ブックマークの取得に失敗しました')
       }
       const result = await response.json()
       setBookmarks(result.data || [])
@@ -34,7 +51,7 @@ export function useBookmarks() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [filters])
 
   // 初回データ取得
   useEffect(() => {
@@ -106,7 +123,7 @@ export function useBookmarks() {
 
       if (!response.ok) {
         const result = await response.json()
-        throw new Error(result.error || 'Failed to create bookmark')
+        throw new Error(result.error || 'ブックマークの作成に失敗しました')
       }
 
       const result = await response.json()
@@ -132,7 +149,7 @@ export function useBookmarks() {
 
       if (!response.ok) {
         const result = await response.json()
-        throw new Error(result.error || 'Failed to update bookmark')
+        throw new Error(result.error || 'ブックマークの更新に失敗しました')
       }
 
       const result = await response.json()
@@ -153,7 +170,7 @@ export function useBookmarks() {
 
       if (!response.ok) {
         const result = await response.json()
-        throw new Error(result.error || 'Failed to delete bookmark')
+        throw new Error(result.error || 'ブックマークの削除に失敗しました')
       }
     } catch (err) {
       setError(
