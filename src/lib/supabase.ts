@@ -1,5 +1,5 @@
 import type { AuthChangeEvent, AuthError, Session } from '@supabase/supabase-js'
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/ssr'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -11,24 +11,49 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Application configuration error')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// ブラウザ専用クライアント（クッキー自動管理）
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 
 // Google認証の実行
 export const signInWithGoogle = async () => {
   try {
-    // SSR対応: 環境変数またはクライアントサイドで動的取得
-    const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL
-      ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
-      : typeof window !== 'undefined'
-        ? `${window.location.origin}/auth/callback`
-        : '/auth/callback'
+    const redirectUrl = `${window.location.origin}/callback`
+    console.log('🔵 OAuth redirect URL:', redirectUrl)
+    console.log('🔵 Current URL:', window.location.href)
+    console.log('🔵 Environment:', {
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'set' : 'missing',
+      supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        ? 'set'
+        : 'missing',
+    })
 
+    // PKCEフローを明示的に使用してOAuth認証を実行
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: redirectUrl,
+        scopes: 'openid email profile',
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
       },
     })
+
+    console.log('🔵 Supabase OAuth result:', {
+      data: data ? 'present' : 'null',
+      url: data?.url || 'no URL',
+      provider: data?.provider || 'no provider',
+      error: error?.message || 'no error',
+    })
+
+    if (data?.url) {
+      console.log('🔵 Generated OAuth URL:', data.url)
+      console.log(
+        '🔵 OAuth URL contains callback?',
+        data.url.includes('/callback'),
+      )
+    }
 
     if (error) {
       console.error('Google sign-in error:', error.message)

@@ -3,12 +3,17 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 // 環境変数をキャッシュしてパフォーマンス向上
-let cachedEnvVars: { url: string; key: string } | null = null
+let cachedEnvVars: {
+  url: string
+  key: string
+  serviceRoleKey?: string
+} | null = null
 
 function getSupabaseEnvVars() {
   if (!cachedEnvVars) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
     if (!supabaseUrl || !supabaseAnonKey) {
       console.error(
@@ -17,7 +22,11 @@ function getSupabaseEnvVars() {
       throw new Error('Server configuration error')
     }
 
-    cachedEnvVars = { url: supabaseUrl, key: supabaseAnonKey }
+    cachedEnvVars = {
+      url: supabaseUrl,
+      key: supabaseAnonKey,
+      serviceRoleKey: supabaseServiceRoleKey,
+    }
   }
 
   return cachedEnvVars
@@ -43,6 +52,34 @@ export async function createClient() {
           console.error('Failed to set cookies:', error)
         }
       },
+    },
+  })
+}
+
+// 管理者権限クライアント（RLSをバイパス）
+export function createServiceRoleClient() {
+  const { url, serviceRoleKey } = getSupabaseEnvVars()
+
+  if (!serviceRoleKey) {
+    console.warn(
+      'Service role key not configured - using anon key with potential RLS restrictions',
+    )
+    return createServerClient(url, getSupabaseEnvVars().key, {
+      cookies: {
+        getAll() {
+          return []
+        },
+        setAll() {},
+      },
+    })
+  }
+
+  return createServerClient(url, serviceRoleKey, {
+    cookies: {
+      getAll() {
+        return []
+      },
+      setAll() {},
     },
   })
 }
@@ -87,4 +124,30 @@ export async function validateApiAuth() {
   }
 
   return { user, error: null }
+}
+
+// ホワイトリストチェック（RLS対応）
+export async function checkUserInWhitelist(email: string) {
+  const serviceClient = createServiceRoleClient()
+
+  try {
+    const { data: allowedEmail, error } = await serviceClient
+      .from('allowed_emails')
+      .select('email')
+      .eq('email', email)
+      .single()
+
+    return {
+      isAllowed: !!allowedEmail,
+      data: allowedEmail,
+      error,
+    }
+  } catch (error) {
+    console.error('Whitelist check failed:', error)
+    return {
+      isAllowed: false,
+      data: null,
+      error,
+    }
+  }
 }
