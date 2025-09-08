@@ -6,7 +6,6 @@ import type {
   BookmarkFilters,
   BookmarkSearchResult,
   CreateBookmarkData,
-  MetadataExtractResult,
   PaginationOptions,
   UpdateBookmarkData,
 } from '@/types/database'
@@ -232,7 +231,7 @@ export class BookmarkService {
   }
 
   /**
-   * メタデータ抽出（新API使用）
+   * メタデータ抽出（直接実装）
    */
   private async extractMetadata(url: string): Promise<{
     title: string
@@ -240,28 +239,14 @@ export class BookmarkService {
     image: string
   }> {
     try {
-      const response = await fetch('/api/preview', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ url }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Metadata API failed: ${response.statusText}`)
-      }
-
-      const result: MetadataExtractResult = await response.json()
-
-      if (!result.success || !result.data) {
-        throw new Error(result.error || 'Failed to extract metadata')
-      }
+      // 動的インポートでメタデータ抽出処理を実行
+      const { extractMetadataFromHtml } = await import('@/lib/metadata-extractor')
+      const result = await extractMetadataFromHtml(url)
 
       return {
-        title: result.data.title || 'Untitled',
-        description: result.data.description || '',
-        image: result.data.image || '',
+        title: result.title || 'Untitled',
+        description: result.description || '',
+        image: result.image || '',
       }
     } catch (error) {
       console.warn('Metadata extraction failed:', error)
