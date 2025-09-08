@@ -1,0 +1,171 @@
+'use client'
+
+import Link from 'next/link'
+import { useState, useEffect } from 'react'
+import BookmarkForm from '@/components/bookmarks/bookmark-form'
+import BookmarkCard from '@/components/bookmarks/bookmark-card'
+import SignOutButton from '@/components/common/sign-out-button'
+import { useBookmarks } from '@/hooks/use-bookmarks'
+
+export default function BookmarksPage() {
+  const { bookmarks, loading: isLoading, error } = useBookmarks()
+  const [showModal, setShowModal] = useState(false)
+  const [user, setUser] = useState<{ email?: string } | null>(null)
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        // ユーザー情報を取得
+        const userResponse = await fetch('/api/auth/user')
+        if (userResponse.ok) {
+          const userData = await userResponse.json()
+          setUser(userData.user)
+        }
+      } catch (err) {
+        console.error('Error fetching user data:', err)
+      }
+    }
+
+    fetchUserData()
+  }, [])
+
+  const handleBookmarkCreated = () => {
+    // useBookmarksのRealtime機能で自動更新されるため、モーダルを閉じるだけ
+    setShowModal(false)
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <nav className="bg-white shadow-sm">
+        <div className="px-4 sm:px-6 lg:px-8 xl:px-12">
+          <div className="flex justify-between h-16">
+            <div className="flex">
+              <div className="flex-shrink-0 flex items-center">
+                <Link
+                  href="/dashboard"
+                  className="text-xl font-bold text-gray-900 hover:text-gray-700"
+                >
+                  Encore
+                </Link>
+              </div>
+              <div className="hidden sm:ml-6 sm:flex sm:items-center">
+                <nav className="flex space-x-8">
+                  <Link
+                    href="/dashboard"
+                    className="text-gray-500 hover:text-gray-700 px-3 py-2 text-sm font-medium"
+                  >
+                    ダッシュボード
+                  </Link>
+                  <span className="text-blue-600 px-3 py-2 text-sm font-medium">
+                    ブックマーク
+                  </span>
+                </nav>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-700">{user?.email}</span>
+              <SignOutButton />
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main>
+        <div className="py-6 px-4 sm:px-6 lg:px-8 xl:px-12">
+          <div className="py-6">
+            <div className="mb-8 flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  ブックマーク
+                </h1>
+                <p className="mt-1 text-sm text-gray-600">
+                  保存したページとリンクを管理します
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
+              >
+                <svg
+                  className="w-5 h-5 mr-2"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <title>追加</title>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+                新しいブックマーク
+              </button>
+            </div>
+
+            {error && (
+              <div className="mb-6 rounded-md bg-red-50 p-4">
+                <div className="flex">
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-red-800">
+                      データの取得でエラーが発生しました
+                    </h3>
+                    <div className="mt-2 text-sm text-red-700">
+                      ブックマークデータを読み込めませんでした。ページをリロードしてみてください。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isLoading ? (
+              <div className="text-center py-12">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <p className="mt-2 text-sm text-gray-500">読み込み中...</p>
+              </div>
+            ) : !bookmarks || bookmarks.length === 0 ? (
+              <div className="text-center py-12">
+                <svg
+                  className="mx-auto h-12 w-12 text-gray-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+                  />
+                </svg>
+                <h3 className="mt-2 text-sm font-medium text-gray-900">
+                  ブックマークがありません
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  ブラウザ拡張機能やURLの手動追加でブックマークを作成できます。
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
+                {bookmarks.map((bookmark) => (
+                  <BookmarkCard key={bookmark.id} bookmark={bookmark} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      {/* モーダル */}
+      {showModal && (
+        <BookmarkForm
+          onSuccess={handleBookmarkCreated}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+    </div>
+  )
+}
