@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import SignOutButton from '@/components/sign-out-button'
+import SignOutButton from '@/components/common/sign-out-button'
 import { getCurrentUser } from '@/lib/supabase-server'
 
 export default async function DashboardPage() {
