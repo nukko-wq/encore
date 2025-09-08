@@ -210,13 +210,103 @@ export class BookmarkService {
   /**
    * 簡易メタデータ抽出（タイトルのみ）
    */
+  /**
+   * セキュアなURL検証
+   */
+  private validateSecureUrl(url: string): void {
+    try {
+      const urlObj = new URL(url)
+
+      // プロトコル制限
+      if (!['http:', 'https:'].includes(urlObj.protocol)) {
+        throw new Error('Only HTTP/HTTPS protocols are allowed')
+      }
+
+      // プライベートIPアドレス範囲をブロック
+      const hostname = urlObj.hostname
+
+      // IPv4プライベート範囲
+      const privateIpPatterns = [
+        /^127\./, // 127.0.0.0/8 (localhost)
+        /^10\./, // 10.0.0.0/8
+        /^192\.168\./, // 192.168.0.0/16
+        /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+        /^169\.254\./, // 169.254.0.0/16 (link-local)
+        /^0\./, // 0.0.0.0/8
+      ]
+
+      // ローカルホスト・内部ドメイン
+      const blockedDomains = [
+        'localhost',
+        '0.0.0.0',
+        '[::]',
+        'metadata.google.internal', // GCP metadata
+        '169.254.169.254', // AWS/Azure metadata
+      ]
+
+      if (privateIpPatterns.some((pattern) => pattern.test(hostname))) {
+        throw new Error('Private IP addresses are not allowed')
+      }
+
+      if (blockedDomains.includes(hostname.toLowerCase())) {
+        throw new Error('Blocked hostname detected')
+      }
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error('Invalid URL format')
+      }
+      throw error
+    }
+  }
+
+  /**
+   * HTMLタイトルのサニタイゼーション
+   */
+  private sanitizeTitle(title: string): string {
+    // HTMLエンティティをデコード
+    const entityMap: Record<string, string> = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#39;': "'",
+      '&apos;': "'",
+    }
+
+    let sanitized = title
+      // HTMLエンティティをデコード
+      .replace(
+        /&(amp|lt|gt|quot|#39|apos);/g,
+        (match) => entityMap[match] || match,
+      )
+      // HTMLタグを除去
+      .replace(/<[^>]*>/g, '')
+      // 制御文字を除去（RegExpコンストラクタ使用）
+      .replace(new RegExp('[\\x00-\\x1F\\x7F-\\x9F]', 'g'), '')
+      // 複数の空白を単一スペースに
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    // 長さ制限（200文字）
+    if (sanitized.length > 200) {
+      sanitized = `${sanitized.substring(0, 197)}...`
+    }
+
+    return sanitized || 'Untitled'
+  }
+
   private async extractTitle(url: string): Promise<string> {
     try {
+      // セキュリティ検証を実行
+      this.validateSecureUrl(url)
+
       const response = await fetch(url, {
         headers: {
           'User-Agent':
             'Mozilla/5.0 (compatible; Encore/1.0; +https://encore.example.com)',
         },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(10000), // 10秒タイムアウト
       })
 
       if (!response.ok) {
@@ -228,7 +318,7 @@ export class BookmarkService {
       // シンプルなタイトル抽出
       const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
       if (titleMatch?.[1]) {
-        return titleMatch[1].trim()
+        return this.sanitizeTitle(titleMatch[1])
       }
 
       // OGタイトルをフォールバック
@@ -236,7 +326,7 @@ export class BookmarkService {
         /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i,
       )
       if (ogTitleMatch?.[1]) {
-        return ogTitleMatch[1].trim()
+        return this.sanitizeTitle(ogTitleMatch[1])
       }
 
       // URLからファイル名を抽出（最終フォールバック）
