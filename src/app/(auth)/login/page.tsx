@@ -16,7 +16,6 @@ export default function LoginPage() {
         data: { session },
       } = await supabase.auth.getSession()
       if (session) {
-        console.log('🔵 Already logged in, redirecting to dashboard...')
         router.push('/dashboard')
       }
     }
@@ -29,21 +28,13 @@ export default function LoginPage() {
       setIsLoading(true)
       setError(null)
 
-      console.log('🔵 Starting Google OAuth...')
-
       // 既存セッションをクリアしてOAuth認証の競合を防ぐ
-      console.log('🔵 Clearing existing session before OAuth...')
       await supabase.auth.signOut()
 
       // 少し待ってからOAuth開始（セッションクリアの完了を確保）
       await new Promise((resolve) => setTimeout(resolve, 100))
 
-      const { data, error } = await signInWithGoogle()
-
-      console.log('🔵 OAuth response:', {
-        data: data ? 'present' : 'null',
-        error: error?.message || 'no error',
-      })
+      const { error } = await signInWithGoogle()
 
       if (error) {
         let userMessage = 'ログインに失敗しました。'

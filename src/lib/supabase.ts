@@ -18,14 +18,6 @@ export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 export const signInWithGoogle = async () => {
   try {
     const redirectUrl = `${window.location.origin}/callback`
-    console.log('🔵 OAuth redirect URL:', redirectUrl)
-    console.log('🔵 Current URL:', window.location.href)
-    console.log('🔵 Environment:', {
-      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'set' : 'missing',
-      supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-        ? 'set'
-        : 'missing',
-    })
 
     // PKCEフローを明示的に使用してOAuth認証を実行
     const { data, error } = await supabase.auth.signInWithOAuth({
@@ -39,21 +31,6 @@ export const signInWithGoogle = async () => {
         },
       },
     })
-
-    console.log('🔵 Supabase OAuth result:', {
-      data: data ? 'present' : 'null',
-      url: data?.url || 'no URL',
-      provider: data?.provider || 'no provider',
-      error: error?.message || 'no error',
-    })
-
-    if (data?.url) {
-      console.log('🔵 Generated OAuth URL:', data.url)
-      console.log(
-        '🔵 OAuth URL contains callback?',
-        data.url.includes('/callback'),
-      )
-    }
 
     if (error) {
       console.error('Google sign-in error:', error.message)

@@ -9,14 +9,10 @@ export async function GET(request: NextRequest) {
   const errorDescription = searchParams.get('error_description')
   const next = searchParams.get('next') ?? '/dashboard'
 
-  console.log('=== CALLBACK ROUTE START ===')
-  console.log('URL:', request.url)
-  console.log('Search params:', Object.fromEntries(searchParams.entries()))
-  console.log('Code:', code ? 'present' : 'missing')
-  console.log('Error:', error || 'none')
-  console.log('Error Description:', errorDescription || 'none')
-  console.log('Next:', next)
-  console.log('Origin:', origin)
+  // OAuth認証エラーログは重要なので残す（エラー情報のみ）
+  if (error) {
+    console.error('OAuth error:', error, errorDescription)
+  }
 
   // OAuth認証エラーの場合
   if (error) {
@@ -33,10 +29,7 @@ export async function GET(request: NextRequest) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-    console.log('Environment check:', {
-      supabaseUrl: supabaseUrl ? 'set' : 'missing',
-      supabaseKey: supabaseKey ? 'set' : 'missing',
-    })
+    // 環境変数設定の確認（機密情報を含まない）
 
     if (!supabaseUrl || !supabaseKey) {
       console.error('Missing Supabase environment variables')
@@ -58,17 +51,10 @@ export async function GET(request: NextRequest) {
     })
 
     try {
-      console.log('Attempting to exchange code for session...')
       const {
         data: { session },
         error,
       } = await supabase.auth.exchangeCodeForSession(code)
-
-      console.log('Session exchange result:', {
-        session: session ? 'present' : 'null',
-        user: session?.user?.email || 'no user',
-        error: error?.message || 'no error',
-      })
 
       if (error) {
         console.error('Auth callback error:', error.message)
@@ -81,42 +67,27 @@ export async function GET(request: NextRequest) {
       }
 
       // サーバーサイドでホワイトリストチェック
-      console.log('Checking whitelist for:', session.user.email)
       const { data: allowedEmail, error: whitelistError } = await supabase
         .from('allowed_emails')
         .select('email')
         .eq('email', session.user.email)
         .single()
 
-      console.log('Whitelist check result:', {
-        allowedEmail: allowedEmail ? 'found' : 'not found',
-        whitelistError: whitelistError?.message || 'no error',
-      })
-
       if (whitelistError || !allowedEmail) {
-        console.log(`Access denied for email: ${session.user.email}`)
-
+        console.error(`Access denied for email: ${session.user.email}`)
         // 許可されていないユーザーはサインアウト
         await supabase.auth.signOut()
         return NextResponse.redirect(`${origin}/error?message=unauthorized`)
       }
 
       // ホワイトリストチェック通過、ダッシュボードにリダイレクト
-      console.log(
-        '✅ Authentication successful, redirecting to:',
-        `${origin}${next}`,
-      )
-      console.log('=== CALLBACK ROUTE END (SUCCESS) ===')
       return NextResponse.redirect(`${origin}${next}`)
     } catch (error) {
-      console.error('💥 Unexpected callback error:', error)
-      console.log('=== CALLBACK ROUTE END (ERROR) ===')
+      console.error('Unexpected callback error:', error)
       return NextResponse.redirect(`${origin}/error?message=unexpected_error`)
     }
   }
 
   // 認証コードがない場合はログインページに戻す
-  console.log('❌ No auth code found, redirecting to login')
-  console.log('=== CALLBACK ROUTE END (NO CODE) ===')
   return NextResponse.redirect(`${origin}/login`)
 }

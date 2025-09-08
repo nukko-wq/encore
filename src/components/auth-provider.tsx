@@ -36,11 +36,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event, session?.user?.email)
-
       // サインアウト時のクリーンアップ
       if (event === 'SIGNED_OUT') {
-        console.log('User signed out, cleaning up state')
         setUser(null)
         setLoading(false)
         return
@@ -49,10 +46,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // その他の認証状態変更
       setUser(session?.user ?? null)
       setLoading(false)
-
-      if (session?.user) {
-        console.log('User session established:', session.user.email)
-      }
     })
 
     return () => subscription.unsubscribe()
