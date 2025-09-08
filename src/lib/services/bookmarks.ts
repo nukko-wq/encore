@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase-server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import type {
   Bookmark,
   BookmarkFilters,
@@ -12,7 +13,7 @@ export class BookmarkService {
    * RLSポリシーにより自動でユーザーのデータのみ取得
    */
   async getBookmarks(filters?: BookmarkFilters): Promise<Bookmark[]> {
-    const supabase = await createClient()
+    const supabase = await this.getClient()
 
     let query = supabase
       .from('bookmarks')
@@ -54,7 +55,7 @@ export class BookmarkService {
     title?: string
     description?: string
   }): Promise<Bookmark> {
-    const supabase = await createClient()
+    const supabase = await this.getClient()
 
     // 現在のユーザー取得
     const {
@@ -118,7 +119,7 @@ export class BookmarkService {
     id: string,
     updates: UpdateBookmarkData,
   ): Promise<Bookmark> {
-    const supabase = await createClient()
+    const supabase = await this.getClient()
 
     // RLSポリシーにより自動で所有者チェック
     const { data, error } = await supabase
@@ -142,7 +143,7 @@ export class BookmarkService {
    * ブックマーク削除
    */
   async deleteBookmark(id: string): Promise<void> {
-    const supabase = await createClient()
+    const supabase = await this.getClient()
 
     // RLSポリシーにより自動で所有者チェック
     const { error } = await supabase.from('bookmarks').delete().eq('id', id)
@@ -157,7 +158,7 @@ export class BookmarkService {
    */
   async checkDuplicate(url: string): Promise<Bookmark | null> {
     const canonicalUrl = this.normalizeUrl(url)
-    const supabase = await createClient()
+    const supabase = await this.getClient()
 
     const { data, error } = await supabase
       .from('bookmarks')
@@ -339,6 +340,30 @@ export class BookmarkService {
       console.warn('Title extraction failed:', error)
       throw error
     }
+  }
+
+  // Supabaseクライアントキャッシュ（静的）
+  private static clientCache: Map<string, SupabaseClient> = new Map()
+
+  /**
+   * キャッシュ済みSupabaseクライアント取得
+   * パフォーマンス向上のため接続を再利用
+   */
+  private async getClient(): Promise<SupabaseClient> {
+    const cacheKey = 'bookmark-service'
+
+    if (!BookmarkService.clientCache.has(cacheKey)) {
+      const client = await createClient()
+      BookmarkService.clientCache.set(cacheKey, client)
+      return client
+    }
+
+    const cachedClient = BookmarkService.clientCache.get(cacheKey)
+    if (!cachedClient) {
+      throw new Error('Failed to retrieve cached Supabase client')
+    }
+    
+    return cachedClient
   }
 }
 
