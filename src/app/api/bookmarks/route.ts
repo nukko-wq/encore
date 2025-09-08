@@ -41,11 +41,15 @@ export async function GET(request: NextRequest) {
     }
 
     // ブックマーク取得
-    const bookmarks = await bookmarkService.getBookmarks(filters)
+    const result = await bookmarkService.getBookmarks(filters)
 
     return NextResponse.json({
-      data: bookmarks,
-      total: bookmarks.length,
+      data: result.bookmarks,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      has_next: result.has_next,
+      has_prev: result.has_prev,
     })
   } catch (error) {
     console.error('GET /api/bookmarks error:', error)

@@ -1,8 +1,8 @@
 import Link from 'next/link'
-import SignOutButton from '@/components/sign-out-button'
 import BookmarkForm from '@/components/bookmark-form'
-import { getCurrentUser } from '@/lib/supabase-server'
+import SignOutButton from '@/components/sign-out-button'
 import { bookmarkService } from '@/lib/services/bookmarks'
+import { getCurrentUser } from '@/lib/supabase-server'
 import type { Bookmark } from '@/types/database'
 
 export default async function BookmarksPage() {
@@ -14,7 +14,8 @@ export default async function BookmarksPage() {
   let error: string | null = null
 
   try {
-    bookmarks = await bookmarkService.getBookmarks()
+    const result = await bookmarkService.getBookmarks()
+    bookmarks = result.bookmarks
   } catch (err) {
     console.error('Error fetching bookmarks:', err)
     error =

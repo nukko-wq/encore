@@ -80,3 +80,70 @@ export interface BookmarkSearchResult {
   has_next: boolean
   has_prev: boolean
 }
+
+// リンクプレビュー関連の型定義
+export type PreviewStatus = 'success' | 'partial' | 'failed'
+export type PreviewSource = 'node' | 'external' | 'fallback'
+
+export interface LinkPreview {
+  id: string
+  url: string
+  title: string | null
+  description: string | null
+  image: string | null
+  favicon: string | null
+  site_name: string | null
+  status: PreviewStatus
+  source: PreviewSource
+  fetched_at: string
+  revalidate_at: string
+  retry_count: number
+  created_at: string
+  updated_at: string
+}
+
+// メタデータ抽出結果の型
+export interface MetadataExtractResult {
+  success: boolean
+  data?: {
+    title: string
+    description: string
+    image: string
+    favicon: string
+    siteName: string
+    url: string
+  }
+  error?: string
+  source: PreviewSource
+}
+
+// URL正規化結果の型
+export interface UrlNormalizationResult {
+  success: boolean
+  originalUrl: string
+  normalizedUrl: string
+  source: 'edge'
+  error?: string
+}
+
+// キャッシュチェック結果の型
+export interface CacheCheckResult {
+  cached: boolean
+  data?: LinkPreview
+  shouldFetch?: boolean
+  normalizedUrl?: string
+  source: 'cache' | 'node'
+}
+
+// リンクプレビュー作成用の型
+export interface CreateLinkPreviewData {
+  url: string
+  title?: string
+  description?: string
+  image?: string
+  favicon?: string
+  site_name?: string
+  status: PreviewStatus
+  source: PreviewSource
+  retry_count?: number
+}

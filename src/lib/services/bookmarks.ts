@@ -1,10 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase-server'
+import { normalizeUrl } from '@/lib/url-normalization'
 import type {
   Bookmark,
   BookmarkFilters,
   BookmarkSearchResult,
   CreateBookmarkData,
+  MetadataExtractResult,
   PaginationOptions,
   UpdateBookmarkData,
 } from '@/types/database'
@@ -110,14 +112,20 @@ export class BookmarkService {
     // URL正規化
     const canonicalUrl = this.normalizeUrl(data.url)
 
-    // 基本的なメタデータ抽出（タイトルが未指定の場合）
+    // メタデータ抽出（新API使用）
     let title = data.title
-    if (!title) {
+    let description = data.description
+    let thumbnailUrl = ''
+
+    if (!title || !description) {
       try {
-        title = await this.extractTitle(data.url)
+        const metadata = await this.extractMetadata(data.url)
+        title = title || metadata.title || 'Untitled'
+        description = description || metadata.description || ''
+        thumbnailUrl = metadata.image || ''
       } catch (error) {
-        console.warn('Failed to extract title:', error)
-        title = 'Untitled'
+        console.warn('Failed to extract metadata:', error)
+        title = title || 'Untitled'
       }
     }
 
@@ -125,7 +133,8 @@ export class BookmarkService {
       url: data.url,
       canonical_url: canonicalUrl,
       title: title || 'Untitled',
-      description: data.description,
+      description: description,
+      thumbnail_url: thumbnailUrl,
       is_favorite: false,
       is_pinned: false,
       status: 'unread',
@@ -216,169 +225,46 @@ export class BookmarkService {
   }
 
   /**
-   * URL正規化（重複防止用）
+   * URL正規化（重複防止用）- 統一モジュール使用
    */
   private normalizeUrl(url: string): string {
-    try {
-      const urlObj = new URL(url)
-
-      // トラッキングパラメータ除去
-      const trackingParams = [
-        'utm_source',
-        'utm_medium',
-        'utm_campaign',
-        'utm_term',
-        'utm_content',
-        'fbclid',
-        'gclid',
-        'msclkid',
-        '_ga',
-        'mc_eid',
-      ]
-
-      trackingParams.forEach((param) => {
-        urlObj.searchParams.delete(param)
-      })
-
-      // 末尾スラッシュ統一
-      return urlObj.toString().replace(/\/$/, '')
-    } catch (error) {
-      // URL形式エラー時は元のURLを返す
-      console.warn('URL normalization failed:', error)
-      return url
-    }
+    return normalizeUrl(url)
   }
 
   /**
-   * 簡易メタデータ抽出（タイトルのみ）
+   * メタデータ抽出（新API使用）
    */
-  /**
-   * セキュアなURL検証
-   */
-  private validateSecureUrl(url: string): void {
+  private async extractMetadata(url: string): Promise<{
+    title: string
+    description: string
+    image: string
+  }> {
     try {
-      const urlObj = new URL(url)
-
-      // プロトコル制限
-      if (!['http:', 'https:'].includes(urlObj.protocol)) {
-        throw new Error('Only HTTP/HTTPS protocols are allowed')
-      }
-
-      // プライベートIPアドレス範囲をブロック
-      const hostname = urlObj.hostname
-
-      // IPv4プライベート範囲
-      const privateIpPatterns = [
-        /^127\./, // 127.0.0.0/8 (localhost)
-        /^10\./, // 10.0.0.0/8
-        /^192\.168\./, // 192.168.0.0/16
-        /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
-        /^169\.254\./, // 169.254.0.0/16 (link-local)
-        /^0\./, // 0.0.0.0/8
-      ]
-
-      // ローカルホスト・内部ドメイン
-      const blockedDomains = [
-        'localhost',
-        '0.0.0.0',
-        '[::]',
-        'metadata.google.internal', // GCP metadata
-        '169.254.169.254', // AWS/Azure metadata
-      ]
-
-      if (privateIpPatterns.some((pattern) => pattern.test(hostname))) {
-        throw new Error('Private IP addresses are not allowed')
-      }
-
-      if (blockedDomains.includes(hostname.toLowerCase())) {
-        throw new Error('Blocked hostname detected')
-      }
-    } catch (error) {
-      if (error instanceof TypeError) {
-        throw new Error('Invalid URL format')
-      }
-      throw error
-    }
-  }
-
-  /**
-   * HTMLタイトルのサニタイゼーション
-   */
-  private sanitizeTitle(title: string): string {
-    // HTMLエンティティをデコード
-    const entityMap: Record<string, string> = {
-      '&amp;': '&',
-      '&lt;': '<',
-      '&gt;': '>',
-      '&quot;': '"',
-      '&#39;': "'",
-      '&apos;': "'",
-    }
-
-    let sanitized = title
-      // HTMLエンティティをデコード
-      .replace(
-        /&(amp|lt|gt|quot|#39|apos);/g,
-        (match) => entityMap[match] || match,
-      )
-      // HTMLタグを除去
-      .replace(/<[^>]*>/g, '')
-      // 制御文字を除去
-      .replace(/[\p{Cc}\p{Cf}]/gu, '')
-      // 複数の空白を単一スペースに
-      .replace(/\s+/g, ' ')
-      .trim()
-
-    // 長さ制限（200文字）
-    if (sanitized.length > 200) {
-      sanitized = `${sanitized.substring(0, 197)}...`
-    }
-
-    return sanitized || 'Untitled'
-  }
-
-  private async extractTitle(url: string): Promise<string> {
-    try {
-      // セキュリティ検証を実行
-      this.validateSecureUrl(url)
-
-      const response = await fetch(url, {
+      const response = await fetch('/api/preview', {
+        method: 'POST',
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (compatible; Encore/1.0; +https://encore.example.com)',
+          'Content-Type': 'application/json',
         },
-        redirect: 'follow',
-        signal: AbortSignal.timeout(10000), // 10秒タイムアウト
+        body: JSON.stringify({ url }),
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        throw new Error(`Metadata API failed: ${response.statusText}`)
       }
 
-      const html = await response.text()
+      const result: MetadataExtractResult = await response.json()
 
-      // シンプルなタイトル抽出
-      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i)
-      if (titleMatch?.[1]) {
-        return this.sanitizeTitle(titleMatch[1])
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to extract metadata')
       }
 
-      // OGタイトルをフォールバック
-      const ogTitleMatch = html.match(
-        /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i,
-      )
-      if (ogTitleMatch?.[1]) {
-        return this.sanitizeTitle(ogTitleMatch[1])
+      return {
+        title: result.data.title || 'Untitled',
+        description: result.data.description || '',
+        image: result.data.image || '',
       }
-
-      // URLからファイル名を抽出（最終フォールバック）
-      const urlObj = new URL(url)
-      const pathname = urlObj.pathname
-      const filename = pathname.split('/').pop()
-
-      return filename && filename !== '' ? filename : 'Untitled'
     } catch (error) {
-      console.warn('Title extraction failed:', error)
+      console.warn('Metadata extraction failed:', error)
       throw error
     }
   }

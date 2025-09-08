@@ -12,8 +12,12 @@
     "upgrade-interactive": "ncu --interactive --format group"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.57.2",
+    "cheerio": "^1.1.2",
+    "iconv-lite": "^0.7.0",
+    "jsdom": "^26.1.0",
     "next": "15.5.2",
     "react": "19.1.1",
     "react-dom": "^19.1.1"
@@ -21,6 +25,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.2.3",
     "@tailwindcss/postcss": "^4",
+    "@types/jsdom": "^21.1.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19.1.9",
