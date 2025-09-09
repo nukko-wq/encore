@@ -19,19 +19,22 @@ export default function BookmarkEditForm({
   const [url, setUrl] = useState(bookmark.url)
   const [title, setTitle] = useState(bookmark.title || '')
   const [description, setDescription] = useState(bookmark.description || '')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState('')
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!url.trim()) {
-      setError('URLを入力してください')
       return
     }
 
-    setIsLoading(true)
-    setError('')
+    // 楽観的更新なので、更新処理を開始したらすぐにモーダルを閉じる
+    if (onSuccess) {
+      onSuccess()
+    }
+
+    if (onClose) {
+      onClose()
+    }
 
     try {
       await updateBookmark(bookmark.id, {
@@ -39,24 +42,9 @@ export default function BookmarkEditForm({
         title: title.trim() || null,
         description: description.trim() || null,
       })
-
-      // 成功時の処理
-      if (onSuccess) {
-        onSuccess()
-      }
-
-      if (onClose) {
-        onClose()
-      }
     } catch (error) {
       console.error('Error updating bookmark:', error)
-      setError(
-        error instanceof Error
-          ? error.message
-          : 'ブックマークの更新に失敗しました',
-      )
-    } finally {
-      setIsLoading(false)
+      // エラーが発生した場合は、useBookmarksフックが状態を復元するのでここでは何もしない
     }
   }
 
@@ -108,7 +96,6 @@ export default function BookmarkEditForm({
                 placeholder="https://example.com"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
-                disabled={isLoading}
               />
             </div>
 
@@ -126,7 +113,6 @@ export default function BookmarkEditForm({
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="ブックマークのタイトル"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                disabled={isLoading}
               />
             </div>
 
@@ -144,58 +130,23 @@ export default function BookmarkEditForm({
                 placeholder="ブックマークの説明"
                 rows={3}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                disabled={isLoading}
               />
             </div>
-
-            {error && (
-              <div className="text-red-600 text-sm bg-red-50 p-3 rounded-md">
-                {error}
-              </div>
-            )}
 
             <div className="flex space-x-3 pt-4">
               <button
                 type="button"
                 onClick={onClose}
                 className="flex-1 bg-gray-100 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-200 focus:outline-none transition-colors duration-200 cursor-pointer"
-                disabled={isLoading}
               >
                 キャンセル
               </button>
               <button
                 type="submit"
-                disabled={isLoading || !url.trim()}
+                disabled={!url.trim()}
                 className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-200 cursor-pointer"
               >
-                {isLoading ? (
-                  <span className="flex items-center justify-center">
-                    <svg
-                      className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <title>読み込み中</title>
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    更新中...
-                  </span>
-                ) : (
-                  '更新'
-                )}
+                更新
               </button>
             </div>
           </form>
