@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase-client'
-import type { Bookmark } from '@/types/database'
-
-export interface BookmarkFilters {
-  status?: 'unread' | 'read' | 'archived'
-  tags?: string[]
-  is_favorite?: boolean
-  is_pinned?: boolean
-  search?: string
-}
+import type { Bookmark, BookmarkFilters } from '@/types/database'
 
 export function useBookmarks(filters?: BookmarkFilters) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
@@ -22,7 +14,15 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
       // URLパラメータ構築
       const params = new URLSearchParams()
-      if (filters?.status) params.append('status', filters.status)
+      if (filters?.status) {
+        if (Array.isArray(filters.status)) {
+          for (const status of filters.status) {
+            params.append('status', status)
+          }
+        } else {
+          params.append('status', filters.status)
+        }
+      }
       if (filters?.is_favorite !== undefined)
         params.append('is_favorite', String(filters.is_favorite))
       if (filters?.is_pinned !== undefined)
