@@ -1,23 +1,25 @@
 'use client'
 
-import type { Bookmark } from '@/types/database'
 import { useState } from 'react'
 import {
-  MenuTrigger,
   Button,
-  Popover,
   Menu,
   MenuItem,
+  MenuTrigger,
+  Popover,
 } from 'react-aria-components'
+import type { Bookmark } from '@/types/database'
 
 interface BookmarkCardProps {
   bookmark: Bookmark
   onDelete?: (id: string) => Promise<void>
+  onEdit?: (bookmark: Bookmark) => void
 }
 
 export default function BookmarkCard({
   bookmark,
   onDelete,
+  onEdit,
 }: BookmarkCardProps) {
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -52,17 +54,23 @@ export default function BookmarkCard({
     window.open(bookmark.url, '_blank', 'noopener,noreferrer')
   }
 
+  const handleEdit = () => {
+    if (onEdit) {
+      onEdit(bookmark)
+    }
+  }
+
   return (
     <div className="bg-white overflow-hidden shadow rounded-lg hover:shadow-lg transition-all duration-200 flex flex-col h-80 sm:h-96 hover:scale-105 cursor-pointer group relative">
       {/* More Vert Menu */}
-      <div 
-        className="absolute top-2 right-2 z-10"
+      <div
+        className="absolute bottom-2 right-2 z-10"
         onClick={(e) => e.stopPropagation()}
       >
         <MenuTrigger>
           <Button
             aria-label="ブックマークアクション"
-            className="w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 transition-colors duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+            className="w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
             onPress={() => {
               // メニューボタンクリック時は何もしない（メニューを開く）
             }}
@@ -82,12 +90,35 @@ export default function BookmarkCard({
           <Popover className="min-w-32 bg-white rounded-md shadow-lg ring-1 ring-black/5 entering:animate-in entering:fade-in-0 entering:zoom-in-95 exiting:animate-out exiting:fade-out-0 exiting:zoom-out-95 fill-mode-forwards">
             <Menu className="outline-none">
               <MenuItem
+                onAction={handleEdit}
+                className="w-full px-3 py-3 text-sm text-left rounded text-gray-700 outline-none cursor-pointer flex items-center gap-2 hover:bg-gray-100"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="18px"
+                  viewBox="0 -960 960 960"
+                  width="18px"
+                  fill="currentColor"
+                >
+                  <title>編集</title>
+                  <path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h357l-80 80H200v560h560v-278l80-80v358q0 33-23.5 56.5T760-120H200Zm280-360ZM360-360v-170l367-367q12-12 27-18t30-6q16 0 30.5 6t26.5 18l56 57q11 12 17 26.5t6 29.5q0 15-5.5 29.5T897-728L530-360H360Zm481-424-56-56 56 56ZM440-440h56l232-232-28-28-29-28-231 231v57Zm260-260-29-28 29 28 28 28-28-28Z" />
+                </svg>
+                編集
+              </MenuItem>
+              <MenuItem
                 onAction={handleDelete}
                 className="w-full px-3 py-3 text-sm text-left rounded text-gray-700 outline-none cursor-pointer flex items-center gap-2 hover:bg-gray-100"
                 isDisabled={isDeleting}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor">
-                  <path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="18px"
+                  viewBox="0 -960 960 960"
+                  width="18px"
+                  fill="currentColor"
+                >
+                  <title>削除</title>
+                  <path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z" />
                 </svg>
                 {isDeleting ? '削除中...' : '削除'}
               </MenuItem>

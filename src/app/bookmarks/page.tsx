@@ -1,15 +1,19 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
-import BookmarkForm from '@/components/bookmarks/bookmark-form'
+import { useEffect, useState } from 'react'
 import BookmarkCard from '@/components/bookmarks/bookmark-card'
+import BookmarkEditForm from '@/components/bookmarks/bookmark-edit-form'
+import BookmarkForm from '@/components/bookmarks/bookmark-form'
 import SignOutButton from '@/components/common/sign-out-button'
 import { useBookmarks } from '@/hooks/use-bookmarks'
+import type { Bookmark } from '@/types/database'
 
 export default function BookmarksPage() {
   const { bookmarks, loading: isLoading, error } = useBookmarks()
   const [showModal, setShowModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
   const [user, setUser] = useState<{ email?: string } | null>(null)
 
   useEffect(() => {
@@ -32,6 +36,22 @@ export default function BookmarksPage() {
   const handleBookmarkCreated = () => {
     // useBookmarksのRealtime機能で自動更新されるため、モーダルを閉じるだけ
     setShowModal(false)
+  }
+
+  const handleBookmarkEdit = (bookmark: Bookmark) => {
+    setEditingBookmark(bookmark)
+    setShowEditModal(true)
+  }
+
+  const handleBookmarkUpdated = () => {
+    // useBookmarksのRealtime機能で自動更新されるため、モーダルを閉じるだけ
+    setShowEditModal(false)
+    setEditingBookmark(null)
+  }
+
+  const handleEditModalClose = () => {
+    setShowEditModal(false)
+    setEditingBookmark(null)
   }
 
   return (
@@ -151,7 +171,11 @@ export default function BookmarksPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
                 {bookmarks.map((bookmark) => (
-                  <BookmarkCard key={bookmark.id} bookmark={bookmark} />
+                  <BookmarkCard
+                    key={bookmark.id}
+                    bookmark={bookmark}
+                    onEdit={handleBookmarkEdit}
+                  />
                 ))}
               </div>
             )}
@@ -159,11 +183,20 @@ export default function BookmarksPage() {
         </div>
       </main>
 
-      {/* モーダル */}
+      {/* 新規作成モーダル */}
       {showModal && (
         <BookmarkForm
           onSuccess={handleBookmarkCreated}
           onClose={() => setShowModal(false)}
+        />
+      )}
+
+      {/* 編集モーダル */}
+      {showEditModal && editingBookmark && (
+        <BookmarkEditForm
+          bookmark={editingBookmark}
+          onSuccess={handleBookmarkUpdated}
+          onClose={handleEditModalClose}
         />
       )}
     </div>
