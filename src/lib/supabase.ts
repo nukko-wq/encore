@@ -17,7 +17,9 @@ export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey)
 // Google認証の実行
 export const signInWithGoogle = async () => {
   try {
-    const redirectUrl = `${window.location.origin}/callback`
+    const redirectUrl = process.env.NEXT_PUBLIC_SITE_URL
+      ? `${process.env.NEXT_PUBLIC_SITE_URL}/callback`
+      : `${window.location.origin}/callback`
 
     // PKCEフローを明示的に使用してOAuth認証を実行
     const { data, error } = await supabase.auth.signInWithOAuth({
