@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { createPortal } from 'react-dom'
 import {
   Button,
+  Popover,
+  OverlayArrow,
 } from 'react-aria-components'
 import { useBookmarkTags } from '@/hooks/use-bookmark-tags'
 import { useTagSearch } from '@/hooks/use-tag-search'
@@ -17,12 +18,14 @@ interface BookmarkTagManagerProps {
   bookmark: Bookmark
   isOpen: boolean
   onOpenChange: (open: boolean) => void
+  triggerRef?: React.RefObject<HTMLButtonElement | null>
 }
 
 export default function BookmarkTagManager({
   bookmark,
   isOpen,
   onOpenChange,
+  triggerRef,
 }: BookmarkTagManagerProps) {
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [newTagColor, setNewTagColor] = useState('#6366f1')
@@ -86,31 +89,13 @@ export default function BookmarkTagManager({
     [createNewTag, newTagColor, addTag],
   )
 
-  // Escapeキーでポップオーバーを閉じる & フォーカス管理
+  // フォーカス管理
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && isOpen) {
-        event.preventDefault()
-        onOpenChange(false)
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('keydown', handleKeyDown)
+    if (isOpen && popoverRef.current) {
       // フォーカスをダイアログ内に移動
-      if (popoverRef.current) {
-        popoverRef.current.focus()
-      }
-      // bodyのスクロールを無効化
-      document.body.style.overflow = 'hidden'
+      popoverRef.current.focus()
     }
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      // bodyのスクロールを復元
-      document.body.style.overflow = 'unset'
-    }
-  }, [isOpen, onOpenChange])
+  }, [isOpen])
 
   // ポップオーバーが閉じられた時の状態リセット
   const handleOpenChange = useCallback(
@@ -128,29 +113,22 @@ export default function BookmarkTagManager({
   const isLoading = tagsLoading || searchLoading
   const error = tagsError || searchError
 
-  if (!isOpen) return null
-
-  // Portal を使用してbody要素に直接レンダリング
-  return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-start justify-center pt-16">
-      {/* オーバーレイ */}
-      <div 
-        className="fixed inset-0 bg-black/25"
-        onClick={() => handleOpenChange(false)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            handleOpenChange(false)
-          }
-        }}
-        role="button"
-        tabIndex={0}
-        aria-label="ダイアログを閉じる"
-      />
-      
-      {/* ポップオーバーコンテンツ */}
+  return (
+    <Popover
+      isOpen={isOpen}
+      onOpenChange={handleOpenChange}
+      triggerRef={triggerRef}
+      placement="bottom start"
+      offset={8}
+      className="min-w-80 max-w-96 bg-white rounded-lg shadow-xl ring-1 ring-black/5 entering:animate-in entering:fade-in-0 entering:zoom-in-95 exiting:animate-out exiting:fade-out-0 exiting:zoom-out-95 fill-mode-forwards outline-none"
+    >
+      <OverlayArrow className="fill-white">
+        <svg width={12} height={12} viewBox="0 0 12 12">
+          <path d="m0 0 6 6 6-6" />
+        </svg>
+      </OverlayArrow>
       <div
         ref={popoverRef}
-        className="relative min-w-80 max-w-96 bg-white rounded-lg shadow-xl ring-1 ring-black/5 animate-in fade-in-0 zoom-in-95 duration-200 outline-none"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tag-manager-title"
@@ -219,7 +197,6 @@ export default function BookmarkTagManager({
           />
         </div>
       </div>
-    </div>,
-    document.body
+    </Popover>
   )
 }

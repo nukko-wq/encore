@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   Button,
   Menu,
@@ -26,6 +26,7 @@ export default function BookmarkCard({
   // const [isDeleting, setIsDeleting] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isTagManagerOpen, setIsTagManagerOpen] = useState(false)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
 
   // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
   const isLoadingBookmark =
@@ -70,6 +71,7 @@ export default function BookmarkCard({
           }}
         >
           <Button
+            ref={menuButtonRef}
             aria-label="ブックマークアクション"
             className={`w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center outline-none cursor-pointer ${
               isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -265,6 +267,7 @@ export default function BookmarkCard({
         bookmark={bookmark}
         isOpen={isTagManagerOpen}
         onOpenChange={setIsTagManagerOpen}
+        triggerRef={menuButtonRef}
       />
     </div>
   )

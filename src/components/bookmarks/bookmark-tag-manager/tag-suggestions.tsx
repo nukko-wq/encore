@@ -32,7 +32,7 @@ export default function TagSuggestions({
     <Button
       key={tag.id}
       onPress={() => onTagSelect(tag.id)}
-      disabled={isLoading}
+      isDisabled={isLoading}
       className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-all duration-200 outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
         isSelected
           ? 'bg-blue-100 text-blue-800 ring-2 ring-blue-500/20'
@@ -109,7 +109,7 @@ export default function TagSuggestions({
         <div className="border-t pt-4">
           <Button
             onPress={() => onCreateNew(searchQuery.trim())}
-            disabled={isLoading}
+            isDisabled={isLoading}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-green-600 bg-green-50 hover:bg-green-100 rounded-md outline-none transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

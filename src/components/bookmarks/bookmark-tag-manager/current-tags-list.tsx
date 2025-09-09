@@ -37,7 +37,7 @@ export default function CurrentTagsList({
             <span className="truncate max-w-20">{tag.name}</span>
             <Button
               onPress={() => onRemove(tag.id)}
-              disabled={isLoading}
+              isDisabled={isLoading}
               className="w-4 h-4 rounded-full hover:bg-black/20 flex items-center justify-center outline-none transition-colors duration-200 disabled:opacity-50"
               aria-label={`タグ「${tag.name}」を削除`}
             >
