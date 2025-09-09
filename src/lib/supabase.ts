@@ -5,10 +5,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
-    'Supabase configuration error: Missing required environment variables',
-  )
-  throw new Error('Application configuration error')
+  console.error('Supabase設定エラー: 必要な環境変数が不足しています')
+  throw new Error('アプリケーション設定エラー')
 }
 
 // ブラウザ専用クライアント（クッキー自動管理）
@@ -44,7 +42,7 @@ export const signInWithGoogle = async () => {
     return {
       data: null,
       error: {
-        message: 'Authentication service temporarily unavailable',
+        message: '認証サービスが一時的に利用できません',
       } as AuthError,
     }
   }
@@ -62,7 +60,7 @@ export const signOut = async () => {
     return { error }
   } catch (error) {
     console.error('Unexpected error during sign-out:', error)
-    return { error: { message: 'Sign-out failed' } as AuthError }
+    return { error: { message: 'サインアウトに失敗しました' } as AuthError }
   }
 }
 
@@ -83,7 +81,7 @@ export const getCurrentUser = async () => {
     console.error('Unexpected error getting user:', error)
     return {
       user: null,
-      error: { message: 'Failed to retrieve user information' } as AuthError,
+      error: { message: 'ユーザー情報の取得に失敗しました' } as AuthError,
     }
   }
 }

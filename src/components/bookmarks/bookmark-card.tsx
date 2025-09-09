@@ -12,7 +12,7 @@ import type { Bookmark } from '@/types/database'
 
 interface BookmarkCardProps {
   bookmark: Bookmark
-  onDelete?: (id: string) => Promise<void>
+  onDelete: (bookmark: Bookmark) => void
   onEdit?: (bookmark: Bookmark) => void
 }
 
@@ -21,34 +21,16 @@ export default function BookmarkCard({
   onDelete,
   onEdit,
 }: BookmarkCardProps) {
-  const [isDeleting, setIsDeleting] = useState(false)
+  // もう削除スピナーは出さない
+  // const [isDeleting, setIsDeleting] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
-  const handleDelete = async () => {
-    if (isDeleting) return
+  // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
+  const isLoadingBookmark =
+    bookmark.id.startsWith('temp-') || (bookmark as any).isLoading
 
-    const confirmed = window.confirm('このブックマークを削除しますか？')
-    if (!confirmed) return
-
-    setIsDeleting(true)
-    try {
-      if (onDelete) {
-        await onDelete(bookmark.id)
-      } else {
-        // デフォルトの削除処理
-        const response = await fetch(`/api/bookmarks/${bookmark.id}`, {
-          method: 'DELETE',
-        })
-        if (!response.ok) {
-          throw new Error('削除に失敗しました')
-        }
-      }
-    } catch (error) {
-      console.error('Delete error:', error)
-      alert('削除に失敗しました')
-    } finally {
-      setIsDeleting(false)
-    }
+  const handleDelete = () => {
+    onDelete(bookmark)
   }
 
   const handleCardClick = () => {
@@ -111,7 +93,6 @@ export default function BookmarkCard({
               <MenuItem
                 onAction={handleDelete}
                 className="w-full px-3 py-3 text-sm text-left rounded text-gray-700 outline-none cursor-pointer flex items-center gap-2 hover:bg-gray-100"
-                isDisabled={isDeleting}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -123,7 +104,7 @@ export default function BookmarkCard({
                   <title>削除</title>
                   <path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z" />
                 </svg>
-                {isDeleting ? '削除中...' : '削除'}
+                削除
               </MenuItem>
             </Menu>
           </Popover>
@@ -175,9 +156,16 @@ export default function BookmarkCard({
         {/* カードコンテンツ */}
         <div className="p-4 flex-1 flex flex-col">
           {/* タイトル */}
-          <h3 className="text-base font-medium text-gray-900 line-clamp-2 mb-2">
-            {bookmark.title || 'タイトルなし'}
-          </h3>
+          {isLoadingBookmark ? (
+            <div className="space-y-2 mb-2">
+              <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div>
+            </div>
+          ) : (
+            <h3 className="text-base font-medium text-gray-900 line-clamp-2 mb-2">
+              {bookmark.title || 'タイトルなし'}
+            </h3>
+          )}
 
           {/* URL */}
           <div className="text-xs text-blue-600 truncate mb-2">
@@ -185,10 +173,18 @@ export default function BookmarkCard({
           </div>
 
           {/* 説明文 */}
-          {bookmark.description && (
-            <p className="text-sm text-gray-700 line-clamp-3 mb-3">
-              {bookmark.description}
-            </p>
+          {isLoadingBookmark ? (
+            <div className="space-y-1 mb-3">
+              <div className="h-3 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-3 bg-gray-200 rounded animate-pulse w-5/6"></div>
+              <div className="h-3 bg-gray-200 rounded animate-pulse w-2/3"></div>
+            </div>
+          ) : (
+            bookmark.description && (
+              <p className="text-sm text-gray-700 line-clamp-3 mb-3">
+                {bookmark.description}
+              </p>
+            )
           )}
 
           {/* メモ */}

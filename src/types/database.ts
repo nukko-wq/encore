@@ -58,6 +58,7 @@ export interface UpdateBookmarkData {
 // フィルタリング用の型
 export interface BookmarkFilters {
   status?: BookmarkStatus | BookmarkStatus[]
+  tags?: string[]
   is_favorite?: boolean
   is_pinned?: boolean
   search?: string

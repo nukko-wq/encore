@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import BookmarkCard from '@/components/bookmarks/bookmark-card'
+import BookmarkDeleteDialog from '@/components/bookmarks/bookmark-delete-dialog'
 import BookmarkEditForm from '@/components/bookmarks/bookmark-edit-form'
 import BookmarkForm from '@/components/bookmarks/bookmark-form'
 import SignOutButton from '@/components/common/sign-out-button'
@@ -10,10 +11,21 @@ import { useBookmarks } from '@/hooks/use-bookmarks'
 import type { Bookmark } from '@/types/database'
 
 export default function BookmarksPage() {
-  const { bookmarks, loading: isLoading, error } = useBookmarks()
+  const {
+    bookmarks,
+    loading: isLoading,
+    error,
+    createBookmark,
+    deleteBookmark,
+    updateBookmark,
+  } = useBookmarks()
   const [showModal, setShowModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
+  const [deletingBookmark, setDeletingBookmark] = useState<Bookmark | null>(
+    null,
+  )
   const [user, setUser] = useState<{ email?: string } | null>(null)
 
   useEffect(() => {
@@ -52,6 +64,16 @@ export default function BookmarksPage() {
   const handleEditModalClose = () => {
     setShowEditModal(false)
     setEditingBookmark(null)
+  }
+
+  const handleBookmarkDelete = (bookmark: Bookmark) => {
+    setDeletingBookmark(bookmark)
+    setShowDeleteModal(true)
+  }
+
+  const handleDeleteModalClose = () => {
+    setShowDeleteModal(false)
+    setDeletingBookmark(null)
   }
 
   return (
@@ -175,6 +197,7 @@ export default function BookmarksPage() {
                     key={bookmark.id}
                     bookmark={bookmark}
                     onEdit={handleBookmarkEdit}
+                    onDelete={handleBookmarkDelete}
                   />
                 ))}
               </div>
@@ -188,6 +211,7 @@ export default function BookmarksPage() {
         <BookmarkForm
           onSuccess={handleBookmarkCreated}
           onClose={() => setShowModal(false)}
+          createBookmark={createBookmark}
         />
       )}
 
@@ -197,6 +221,16 @@ export default function BookmarksPage() {
           bookmark={editingBookmark}
           onSuccess={handleBookmarkUpdated}
           onClose={handleEditModalClose}
+          updateBookmark={updateBookmark}
+        />
+      )}
+
+      {/* 削除確認モーダル */}
+      {showDeleteModal && deletingBookmark && (
+        <BookmarkDeleteDialog
+          bookmark={deletingBookmark}
+          onDelete={deleteBookmark}
+          onClose={handleDeleteModalClose}
         />
       )}
     </div>

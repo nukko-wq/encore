@@ -68,11 +68,15 @@ export class BookmarkService {
     const [countResult, dataResult] = await Promise.all([countQuery, dataQuery])
 
     if (countResult.error) {
-      throw new Error(`Failed to count bookmarks: ${countResult.error.message}`)
+      throw new Error(
+        `ブックマーク数の取得に失敗しました: ${countResult.error.message}`,
+      )
     }
 
     if (dataResult.error) {
-      throw new Error(`Failed to fetch bookmarks: ${dataResult.error.message}`)
+      throw new Error(
+        `ブックマークの取得に失敗しました: ${dataResult.error.message}`,
+      )
     }
 
     const total = countResult.count ?? 0
@@ -123,7 +127,7 @@ export class BookmarkService {
         description = description || metadata.description || ''
         thumbnailUrl = metadata.image || ''
       } catch (error) {
-        console.warn('Failed to extract metadata:', error)
+        console.warn('メタデータの抽出に失敗しました:', error)
         title = title || 'Untitled'
       }
     }
@@ -155,7 +159,7 @@ export class BookmarkService {
         // unique_violation
         throw new Error('このURLは既に保存されています')
       }
-      throw new Error(`Failed to create bookmark: ${error.message}`)
+      throw new Error(`ブックマークの作成に失敗しました: ${error.message}`)
     }
 
     return bookmark
@@ -182,7 +186,7 @@ export class BookmarkService {
       .single()
 
     if (error) {
-      throw new Error(`Failed to update bookmark: ${error.message}`)
+      throw new Error(`ブックマークの更新に失敗しました: ${error.message}`)
     }
 
     return data
@@ -198,7 +202,7 @@ export class BookmarkService {
     const { error } = await supabase.from('bookmarks').delete().eq('id', id)
 
     if (error) {
-      throw new Error(`Failed to delete bookmark: ${error.message}`)
+      throw new Error(`ブックマークの削除に失敗しました: ${error.message}`)
     }
   }
 
@@ -217,7 +221,7 @@ export class BookmarkService {
 
     if (error && error.code !== 'PGRST116') {
       // PGRST116 = no rows found
-      throw new Error(`Failed to check duplicate: ${error.message}`)
+      throw new Error(`重複チェックに失敗しました: ${error.message}`)
     }
 
     return data || null
@@ -274,7 +278,9 @@ export class BookmarkService {
 
     const cachedClient = BookmarkService.clientCache.get(cacheKey)
     if (!cachedClient) {
-      throw new Error('Failed to retrieve cached Supabase client')
+      throw new Error(
+        'キャッシュされたSupabaseクライアントの取得に失敗しました',
+      )
     }
 
     return cachedClient

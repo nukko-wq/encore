@@ -1,21 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import { useBookmarks } from '@/hooks/use-bookmarks'
 import type { Bookmark } from '@/types/database'
 
 interface BookmarkEditFormProps {
   bookmark: Bookmark
   onSuccess?: () => void
   onClose?: () => void
+  updateBookmark: (id: string, updates: Partial<Bookmark>) => Promise<Bookmark>
 }
 
 export default function BookmarkEditForm({
   bookmark,
   onSuccess,
   onClose,
+  updateBookmark,
 }: BookmarkEditFormProps) {
-  const { updateBookmark } = useBookmarks()
   const [url, setUrl] = useState(bookmark.url)
   const [title, setTitle] = useState(bookmark.title || '')
   const [description, setDescription] = useState(bookmark.description || '')
@@ -61,7 +61,7 @@ export default function BookmarkEditForm({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
         {/* ヘッダー */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
