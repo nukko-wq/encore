@@ -22,6 +22,7 @@ export default function BookmarkCard({
   onEdit,
 }: BookmarkCardProps) {
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   const handleDelete = async () => {
     if (isDeleting) return
@@ -67,10 +68,14 @@ export default function BookmarkCard({
         className="absolute bottom-2 right-2 z-10"
         onClick={(e) => e.stopPropagation()}
       >
-        <MenuTrigger>
+        <MenuTrigger isOpen={isMenuOpen} onOpenChange={setIsMenuOpen}>
           <Button
             aria-label="ブックマークアクション"
-            className="w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer"
+            className={`w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer ${
+              isMenuOpen
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
+            }`}
             onPress={() => {
               // メニューボタンクリック時は何もしない（メニューを開く）
             }}
