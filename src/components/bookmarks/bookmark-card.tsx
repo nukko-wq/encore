@@ -8,6 +8,7 @@ import {
   MenuTrigger,
   Popover,
 } from 'react-aria-components'
+import BookmarkTagManager from './bookmark-tag-manager'
 import type { Bookmark } from '@/types/database'
 
 interface BookmarkCardProps {
@@ -24,6 +25,7 @@ export default function BookmarkCard({
   // もう削除スピナーは出さない
   // const [isDeleting, setIsDeleting] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isTagManagerOpen, setIsTagManagerOpen] = useState(false)
 
   // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
   const isLoadingBookmark =
@@ -43,6 +45,14 @@ export default function BookmarkCard({
     }
   }
 
+  const handleTagManager = () => {
+    // メニューを先に閉じてから、少し遅延してタグマネージャーを開く
+    setIsMenuOpen(false)
+    setTimeout(() => {
+      setIsTagManagerOpen(true)
+    }, 100) // 100ms遅延でMenuTriggerのPopoverが完全に閉じてから開く
+  }
+
   return (
     <div className="bg-white overflow-hidden shadow rounded-lg hover:shadow-lg transition-all duration-200 flex flex-col h-80 sm:h-96 hover:scale-105 cursor-pointer group relative">
       {/* More Vert Menu */}
@@ -50,7 +60,15 @@ export default function BookmarkCard({
         className="absolute bottom-2 right-2 z-10"
         onClick={(e) => e.stopPropagation()}
       >
-        <MenuTrigger isOpen={isMenuOpen} onOpenChange={setIsMenuOpen}>
+        <MenuTrigger 
+          isOpen={isMenuOpen && !isTagManagerOpen} 
+          onOpenChange={(open) => {
+            // タグマネージャーが開いている時はメニューを開かない
+            if (!isTagManagerOpen) {
+              setIsMenuOpen(open)
+            }
+          }}
+        >
           <Button
             aria-label="ブックマークアクション"
             className={`w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center outline-none cursor-pointer ${
@@ -75,10 +93,7 @@ export default function BookmarkCard({
           <Popover className="min-w-32 bg-white rounded-md shadow-lg ring-1 ring-black/5 entering:animate-in entering:fade-in-0 entering:zoom-in-95 exiting:animate-out exiting:fade-out-0 exiting:zoom-out-95 fill-mode-forwards">
             <Menu className="outline-none">
               <MenuItem
-                onAction={() => {
-                  // TODO: タグ管理モーダルを開く
-                  console.log('タグ管理')
-                }}
+                onAction={handleTagManager}
                 className="w-full px-3 py-3 text-sm text-left rounded text-gray-700 outline-none cursor-pointer flex items-center gap-2 hover:bg-gray-100"
               >
                 <svg
@@ -244,6 +259,13 @@ export default function BookmarkCard({
           </div>
         </div>
       </button>
+
+      {/* タグ管理ポップオーバー */}
+      <BookmarkTagManager
+        bookmark={bookmark}
+        isOpen={isTagManagerOpen}
+        onOpenChange={setIsTagManagerOpen}
+      />
     </div>
   )
 }
