@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import type { Bookmark, BookmarkFilters } from '@/types/database'
 
 export function useBookmarks(filters?: BookmarkFilters) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // stale closure対策：常に最新のbookmarks状態をrefで保持
+  const bookmarksRef = useRef(bookmarks)
+  bookmarksRef.current = bookmarks
 
   // ブックマーク取得関数（useCallbackで依存関係を管理）
   const fetchBookmarks = useCallback(async () => {
@@ -57,98 +61,138 @@ export function useBookmarks(filters?: BookmarkFilters) {
     fetchBookmarks()
   }, [fetchBookmarks])
 
-  const createBookmark = async (data: {
-    url: string
-    title?: string
-    description?: string
-  }) => {
-    try {
-      const response = await fetch('/api/bookmarks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-      })
-
-      if (!response.ok) {
-        const result = await response.json()
-        throw new Error(result.error || 'ブックマークの作成に失敗しました')
+  const createBookmark = useCallback(
+    async (data: { url: string; title?: string; description?: string }) => {
+      // 1. 一時IDでtemp entryを即座に作成（真の楽観的更新）
+      const tempId = `temp-${crypto.randomUUID()}`
+      const tempBookmark: Bookmark = {
+        id: tempId,
+        url: data.url,
+        canonical_url: data.url, // 一時的：APIレスポンスで正式な値に置換
+        title: data.title || 'Untitled',
+        description: data.description || '',
+        memo: null,
+        thumbnail_url: null,
+        is_favorite: false,
+        is_pinned: false,
+        pinned_at: null,
+        status: 'unread',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        user_id: '', // 一時的：APIレスポンスで正式な値に置換
       }
 
-      const result = await response.json()
-      const newBookmark = result.data
-
-      // 手動でローカル状態を更新（リストの先頭に追加）- 即時反映
-      setBookmarks((prev) => [newBookmark, ...prev])
+      // 2. 即座にUI更新（楽観的更新）
+      setBookmarks((prev) => [tempBookmark, ...prev])
       setError(null)
 
-      // 後追いで正確な一覧を再取得（ページング/ソート整合性確保）
-      fetchBookmarks()
+      try {
+        // 3. API呼び出し
+        const response = await fetch('/api/bookmarks', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data),
+        })
 
-      return newBookmark
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'ブックマークの作成に失敗しました',
-      )
-      throw err
-    }
-  }
+        if (!response.ok) {
+          const result = await response.json()
+          throw new Error(result.error || 'ブックマークの作成に失敗しました')
+        }
 
-  const updateBookmark = async (id: string, updates: Partial<Bookmark>) => {
-    // 楽観的更新：即座にローカル状態を更新
-    const previousBookmarks = bookmarks
-    setBookmarks((prev) =>
-      prev.map((bookmark) =>
-        bookmark.id === id ? { ...bookmark, ...updates } : bookmark,
-      ),
-    )
-
-    try {
-      const response = await fetch(`/api/bookmarks/${id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updates),
-      })
-
-      if (!response.ok) {
         const result = await response.json()
-        throw new Error(result.error || 'ブックマークの更新に失敗しました')
+        const savedBookmark = result.data
+
+        // 4. tempを正式なブックマークに置換
+        setBookmarks((prev) =>
+          prev.map((bookmark) =>
+            bookmark.id === tempId ? savedBookmark : bookmark,
+          ),
+        )
+
+        return savedBookmark
+      } catch (err) {
+        // 5. エラー時はtempを削除（rollback）
+        setBookmarks((prev) =>
+          prev.filter((bookmark) => bookmark.id !== tempId),
+        )
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'ブックマークの作成に失敗しました',
+        )
+        throw err
       }
+    },
+    [],
+  )
 
-      const result = await response.json()
-      const updatedBookmark = result.data
+  const updateBookmark = useCallback(
+    async (id: string, updates: Partial<Bookmark>) => {
+      // 1. 現在の状態をref経由で取得（stale closure回避）
+      const previousBookmarks = bookmarksRef.current
 
-      // サーバーからの正式な結果で状態を更新
+      // 2. 楽観的更新：即座にローカル状態を更新
       setBookmarks((prev) =>
         prev.map((bookmark) =>
-          bookmark.id === id ? updatedBookmark : bookmark,
+          bookmark.id === id ? { ...bookmark, ...updates } : bookmark,
         ),
       )
       setError(null)
 
-      // 後追いで正確な一覧を再取得（フィルタやソートの整合性確保）
-      fetchBookmarks()
+      try {
+        // 3. API呼び出し
+        const response = await fetch(`/api/bookmarks/${id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updates),
+        })
 
-      return updatedBookmark
-    } catch (err) {
-      // エラー時は前の状態に戻す（ロールバック）
-      setBookmarks(previousBookmarks)
-      setError(
-        err instanceof Error ? err.message : 'ブックマークの更新に失敗しました',
-      )
-      throw err
-    }
-  }
+        if (!response.ok) {
+          const result = await response.json()
+          throw new Error(result.error || 'ブックマークの更新に失敗しました')
+        }
 
-  const deleteBookmark = async (id: string) => {
-    // 楽観的更新：即座にローカル状態から削除
-    const previousBookmarks = bookmarks
+        const result = await response.json()
+        const updatedBookmark = result.data
+
+        // 4. サーバーからの正式な結果で状態を更新
+        setBookmarks((prev) =>
+          prev.map((bookmark) =>
+            bookmark.id === id ? updatedBookmark : bookmark,
+          ),
+        )
+
+        // fetchBookmarks()呼び出し削除：楽観的更新で完結
+
+        return updatedBookmark
+      } catch (err) {
+        // 5. エラー時は完全復旧
+        setBookmarks(previousBookmarks)
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'ブックマークの更新に失敗しました',
+        )
+        throw err
+      }
+    },
+    [],
+  )
+
+  const deleteBookmark = useCallback(async (id: string) => {
+    // 1. 現在の状態をref経由で取得（stale closure回避）
+    const previousBookmarks = bookmarksRef.current
+
+    // 2. 即座に削除（楽観的更新）
     setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+    setError(null)
 
     try {
+      // 3. API呼び出し
       const response = await fetch(`/api/bookmarks/${id}`, {
         method: 'DELETE',
       })
@@ -158,19 +202,16 @@ export function useBookmarks(filters?: BookmarkFilters) {
         throw new Error(result.error || 'ブックマークの削除に失敗しました')
       }
 
-      setError(null)
-
-      // 後追いで正確な一覧を再取得（整合性確保）
-      fetchBookmarks()
+      // fetchBookmarks()呼び出し削除：楽観的更新で完結
     } catch (err) {
-      // エラー時は前の状態に戻す（ロールバック）
+      // 4. エラー時は完全復旧
       setBookmarks(previousBookmarks)
       setError(
         err instanceof Error ? err.message : 'ブックマークの削除に失敗しました',
       )
       throw err
     }
-  }
+  }, [])
 
   return {
     bookmarks,
