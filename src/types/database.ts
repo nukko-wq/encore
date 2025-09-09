@@ -45,6 +45,8 @@ export interface CreateBookmarkData {
 
 // ブックマーク更新用の型
 export interface UpdateBookmarkData {
+  url?: string
+  canonical_url?: string
   title?: string
   description?: string
   thumbnail_url?: string
