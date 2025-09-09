@@ -1,21 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import { useBookmarks } from '@/hooks/use-bookmarks'
 import type { Bookmark } from '@/types/database'
 
 interface BookmarkEditFormProps {
   bookmark: Bookmark
   onSuccess?: () => void
   onClose?: () => void
+  updateBookmark: (id: string, updates: Partial<Bookmark>) => Promise<Bookmark>
 }
 
 export default function BookmarkEditForm({
   bookmark,
   onSuccess,
   onClose,
+  updateBookmark,
 }: BookmarkEditFormProps) {
-  const { updateBookmark } = useBookmarks()
   const [url, setUrl] = useState(bookmark.url)
   const [title, setTitle] = useState(bookmark.title || '')
   const [description, setDescription] = useState(bookmark.description || '')

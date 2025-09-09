@@ -16,6 +16,7 @@ export default function BookmarksPage() {
     error,
     createBookmark,
     deleteBookmark,
+    updateBookmark,
   } = useBookmarks()
   const [showModal, setShowModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -205,6 +206,7 @@ export default function BookmarksPage() {
           bookmark={editingBookmark}
           onSuccess={handleBookmarkUpdated}
           onClose={handleEditModalClose}
+          updateBookmark={updateBookmark}
         />
       )}
     </div>
