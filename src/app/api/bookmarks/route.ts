@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/bookmarks error:', error)
     return NextResponse.json(
       {
-        error: 'Failed to fetch bookmarks',
+        error: 'ブックマークの取得に失敗しました',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 },
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     // バリデーション
     if (!url || typeof url !== 'string') {
       return NextResponse.json(
-        { error: 'URL is required and must be a string' },
+        { error: 'URLが必要であり、文字列である必要があります' },
         { status: 400 },
       )
     }
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     try {
       new URL(url)
     } catch {
-      return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 })
+      return NextResponse.json({ error: 'URLの形式が不正です' }, { status: 400 })
     }
 
     // 重複チェック
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
     if (existing) {
       return NextResponse.json(
         {
-          error: 'Duplicate URL',
+          error: 'URLが重複しています',
           message: 'このURLは既に保存されています',
           existing_bookmark: existing,
         },
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         data: bookmark,
-        message: 'Bookmark created successfully',
+        message: 'ブックマークが正常に作成されました',
       },
       { status: 201 },
     )
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: 'Failed to create bookmark',
+        error: 'ブックマークの作成に失敗しました',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 },

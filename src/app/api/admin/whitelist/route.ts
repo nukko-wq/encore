@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
     const { email } = await request.json()
 
     if (!email) {
-      return NextResponse.json({ error: 'Email is required' }, { status: 400 })
+      return NextResponse.json({ error: 'メールアドレスが必要です' }, { status: 400 })
     }
 
     // 管理者権限でサービスロールクライアント使用
@@ -23,13 +23,13 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      message: 'Email added to whitelist successfully',
+      message: 'ホワイトリストにメールアドレスが正常に追加されました',
       data,
     })
   } catch (error) {
     return NextResponse.json(
       {
-        error: 'Failed to add email to whitelist',
+        error: 'ホワイトリストへのメールアドレス追加に失敗しました',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 },
@@ -56,7 +56,7 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json(
       {
-        error: 'Failed to fetch whitelist',
+        error: 'ホワイトリストの取得に失敗しました',
         details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 },

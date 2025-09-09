@@ -42,7 +42,7 @@ export default function BookmarkForm({
       const result = await response.json()
 
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to create bookmark')
+        throw new Error(result.error || 'ブックマークの作成に失敗しました')
       }
 
       // 成功時の処理
