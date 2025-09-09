@@ -88,7 +88,10 @@ export async function POST(request: NextRequest) {
     try {
       new URL(url)
     } catch {
-      return NextResponse.json({ error: 'URLの形式が不正です' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'URLの形式が不正です' },
+        { status: 400 },
+      )
     }
 
     // 重複チェック

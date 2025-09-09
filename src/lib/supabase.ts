@@ -5,9 +5,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
-    'Supabase設定エラー: 必要な環境変数が不足しています',
-  )
+  console.error('Supabase設定エラー: 必要な環境変数が不足しています')
   throw new Error('アプリケーション設定エラー')
 }
 

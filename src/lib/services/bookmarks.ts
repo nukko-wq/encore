@@ -68,11 +68,15 @@ export class BookmarkService {
     const [countResult, dataResult] = await Promise.all([countQuery, dataQuery])
 
     if (countResult.error) {
-      throw new Error(`ブックマーク数の取得に失敗しました: ${countResult.error.message}`)
+      throw new Error(
+        `ブックマーク数の取得に失敗しました: ${countResult.error.message}`,
+      )
     }
 
     if (dataResult.error) {
-      throw new Error(`ブックマークの取得に失敗しました: ${dataResult.error.message}`)
+      throw new Error(
+        `ブックマークの取得に失敗しました: ${dataResult.error.message}`,
+      )
     }
 
     const total = countResult.count ?? 0
@@ -274,7 +278,9 @@ export class BookmarkService {
 
     const cachedClient = BookmarkService.clientCache.get(cacheKey)
     if (!cachedClient) {
-      throw new Error('キャッシュされたSupabaseクライアントの取得に失敗しました')
+      throw new Error(
+        'キャッシュされたSupabaseクライアントの取得に失敗しました',
+      )
     }
 
     return cachedClient

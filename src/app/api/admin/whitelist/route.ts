@@ -7,7 +7,10 @@ export async function POST(request: NextRequest) {
     const { email } = await request.json()
 
     if (!email) {
-      return NextResponse.json({ error: 'メールアドレスが必要です' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'メールアドレスが必要です' },
+        { status: 400 },
+      )
     }
 
     // 管理者権限でサービスロールクライアント使用
