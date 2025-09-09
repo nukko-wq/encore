@@ -38,8 +38,9 @@
 
 ### 認証・アクセス制御
 - **Supabase Auth**: Google OAuth + RLS（Row Level Security）
-- **二段階ホワイトリスト**: Auth hooks + RLS policies
+- **最適化されたホワイトリスト**: RLS policies（データベースレベル）+ ログイン時チェック（UX向上）
 - **citext使用**: 大文字小文字を自動無視
+- **パフォーマンス**: セッション復帰時の冗長なチェック削除
 
 ### データベース設計
 - **URL重複防止**: canonical_urlフィールド + ユニークインデックス

@@ -167,92 +167,77 @@ export function useBookmarks(filters?: BookmarkFilters) {
 }
 ```
 
-### useAuth Hook
+### useAuth Hook (AuthProvider使用)
 ```typescript
-// hooks/use-auth.ts
-import { useState, useEffect } from 'react'
-import { supabase, signInWithGoogle, signOut, getCurrentUser, checkWhitelistEmail } from '@/lib/supabase'
+// components/common/auth-provider.tsx - 最適化済み実装
 import type { User } from '@supabase/supabase-js'
+import { createContext, useContext, useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
-export function useAuth() {
+type AuthContextType = {
+  user: User | null
+  loading: boolean
+  signOut: () => Promise<void>
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [isAllowed, setIsAllowed] = useState(false)
 
   useEffect(() => {
-    // 初回認証状態チェック
-    const checkAuth = async () => {
-      try {
-        const { user: currentUser } = await getCurrentUser()
-        setUser(currentUser)
-        
-        if (currentUser?.email) {
-          const allowed = await checkWhitelistEmail(currentUser.email)
-          setIsAllowed(allowed)
-        }
-      } catch (error) {
-        console.error('Auth check failed:', error)
-      } finally {
-        setLoading(false)
-      }
+    // 初回セッション取得
+    const getInitialSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      setUser(session?.user ?? null)
+      setLoading(false)
     }
 
-    checkAuth()
+    getInitialSession()
 
     // 認証状態変更の監視
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setUser(session?.user || null)
-        
-        if (session?.user?.email) {
-          const allowed = await checkWhitelistEmail(session.user.email)
-          setIsAllowed(allowed)
-        } else {
-          setIsAllowed(false)
-        }
-        
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
         setLoading(false)
+        return
       }
-    )
 
-    return () => {
-      subscription.unsubscribe()
-    }
+      setUser(session?.user ?? null)
+      setLoading(false)
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
-  const login = async () => {
-    try {
-      const { error } = await signInWithGoogle()
-      if (error) throw error
-    } catch (error) {
-      console.error('Login failed:', error)
-      throw error
-    }
+  const signOutUser = async () => {
+    await supabase.auth.signOut()
+    setUser(null)
   }
 
-  const logout = async () => {
-    try {
-      const { error } = await signOut()
-      if (error) throw error
-      setUser(null)
-      setIsAllowed(false)
-    } catch (error) {
-      console.error('Logout failed:', error)
-      throw error
-    }
-  }
+  return (
+    <AuthContext.Provider value={{ user, loading, signOut: signOutUser }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
 
-  return {
-    user,
-    isAllowed,
-    loading,
-    login,
-    logout,
-    isAuthenticated: !!user,
-    canAccess: !!user && isAllowed
+export const useAuth = () => {
+  const context = useContext(AuthContext)
+  if (context === undefined) {
+    throw new Error('useAuthはAuthProvider内で使用する必要があります')
   }
+  return context
 }
 ```
+
+**重要な変更点**:
+- **ホワイトリストチェック削除**: セッション復帰時の冗長なDB問い合わせを削除
+- **パフォーマンス向上**: 認証状態管理のみに集中
+- **セキュリティ保証**: Supabase RLSが確実な保護を提供
 
 ### useTags Hook
 ```typescript
