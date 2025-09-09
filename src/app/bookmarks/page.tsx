@@ -15,6 +15,7 @@ export default function BookmarksPage() {
     loading: isLoading,
     error,
     createBookmark,
+    deleteBookmark,
   } = useBookmarks()
   const [showModal, setShowModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -180,6 +181,7 @@ export default function BookmarksPage() {
                     key={bookmark.id}
                     bookmark={bookmark}
                     onEdit={handleBookmarkEdit}
+                    onDelete={deleteBookmark}
                   />
                 ))}
               </div>

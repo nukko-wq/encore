@@ -9,11 +9,10 @@ import {
   Popover,
 } from 'react-aria-components'
 import type { Bookmark } from '@/types/database'
-import { useBookmarks } from '@/hooks/use-bookmarks'
 
 interface BookmarkCardProps {
   bookmark: Bookmark
-  onDelete?: (id: string) => Promise<void>
+  onDelete: (id: string) => Promise<void>
   onEdit?: (bookmark: Bookmark) => void
 }
 
@@ -22,7 +21,6 @@ export default function BookmarkCard({
   onDelete,
   onEdit,
 }: BookmarkCardProps) {
-  const { deleteBookmark } = useBookmarks()
   const [isDeleting, setIsDeleting] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
@@ -34,12 +32,7 @@ export default function BookmarkCard({
 
     setIsDeleting(true)
     try {
-      if (onDelete) {
-        await onDelete(bookmark.id)
-      } else {
-        // use-bookmarksフックの削除処理を使用
-        await deleteBookmark(bookmark.id)
-      }
+      await onDelete(bookmark.id)
     } catch (error) {
       console.error('Delete error:', error)
       alert('削除に失敗しました')
