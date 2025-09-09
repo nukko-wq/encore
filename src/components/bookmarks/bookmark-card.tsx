@@ -12,7 +12,7 @@ import type { Bookmark } from '@/types/database'
 
 interface BookmarkCardProps {
   bookmark: Bookmark
-  onDelete: (id: string) => Promise<void>
+  onDelete: (bookmark: Bookmark) => void
   onEdit?: (bookmark: Bookmark) => void
 }
 
@@ -26,18 +26,11 @@ export default function BookmarkCard({
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
   // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
-  const isLoadingBookmark = bookmark.id.startsWith('temp-') || (bookmark as any).isLoading
+  const isLoadingBookmark =
+    bookmark.id.startsWith('temp-') || (bookmark as any).isLoading
 
-  const handleDelete = async () => {
-    const confirmed = window.confirm('このブックマークを削除しますか？')
-    if (!confirmed) return
-
-    try {
-      await onDelete(bookmark.id)
-    } catch (error) {
-      console.error('Delete error:', error)
-      alert('削除に失敗しました')
-    }
+  const handleDelete = () => {
+    onDelete(bookmark)
   }
 
   const handleCardClick = () => {
