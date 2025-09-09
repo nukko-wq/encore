@@ -1,16 +1,18 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useTags, type TagWithChildren } from '@/hooks/use-tags'
+import { useTags, type TagWithChildren, type TagRow } from '@/hooks/use-tags'
 
 interface TagsTreeProps {
   onTagSelect?: (tagId: string) => void
   selectedTagId?: string
+  onTagEdit?: (tag: TagRow) => void
 }
 
 export default function TagsTree({
   onTagSelect,
   selectedTagId,
+  onTagEdit,
 }: TagsTreeProps) {
   const { tagsTree, loading, error, updateTag, deleteTag, reorderTags } =
     useTags()
@@ -143,6 +145,17 @@ export default function TagsTree({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation()
+                  onTagEdit?.(tag)
+                }}
+                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-blue-600 rounded"
+                aria-label={`タグ「${tag.name}」を編集`}
+              >
+                ✏️
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
                   handleDeleteTag(tag.id, tag.name)
                 }}
                 className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
@@ -167,6 +180,7 @@ export default function TagsTree({
       handleDrop,
       handleDragOver,
       onTagSelect,
+      onTagEdit,
       toggleExpand,
       handleDeleteTag,
     ],
