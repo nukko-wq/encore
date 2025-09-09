@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useBookmarks } from '@/hooks/use-bookmarks'
 
 interface BookmarkFormProps {
   onSuccess?: () => void
@@ -13,6 +14,7 @@ export default function BookmarkForm({
   onClose,
 }: BookmarkFormProps) {
   const router = useRouter()
+  const { createBookmark, error: hookError } = useBookmarks()
   const [url, setUrl] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
@@ -29,21 +31,9 @@ export default function BookmarkForm({
     setError('')
 
     try {
-      const response = await fetch('/api/bookmarks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: url.trim(),
-        }),
+      await createBookmark({
+        url: url.trim(),
       })
-
-      const result = await response.json()
-
-      if (!response.ok) {
-        throw new Error(result.error || 'ブックマークの作成に失敗しました')
-      }
 
       // 成功時の処理
       setUrl('')
@@ -121,9 +111,9 @@ export default function BookmarkForm({
               />
             </div>
 
-            {error && (
+            {(error || hookError) && (
               <div className="text-red-600 text-sm bg-red-50 p-3 rounded-md">
-                {error}
+                {error || hookError}
               </div>
             )}
 
