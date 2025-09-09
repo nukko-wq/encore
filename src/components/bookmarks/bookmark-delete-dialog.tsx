@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import type { Bookmark } from '@/types/database'
 
 interface BookmarkDeleteDialogProps {
@@ -14,26 +13,20 @@ export default function BookmarkDeleteDialog({
   onDelete,
   onClose,
 }: BookmarkDeleteDialogProps) {
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [error, setError] = useState('')
-
   const handleDelete = async () => {
-    setIsDeleting(true)
-    setError('')
+    // 楽観的更新なので、削除処理を開始したらすぐにダイアログを閉じる
+    onClose()
 
     try {
       await onDelete(bookmark.id)
-      onClose()
     } catch (error) {
       console.error('Delete error:', error)
-      setError(error instanceof Error ? error.message : '削除に失敗しました')
-    } finally {
-      setIsDeleting(false)
+      // エラーが発生した場合は、useBookmarksフックが状態を復元するのでここでは何もしない
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
         {/* ヘッダー */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
@@ -44,7 +37,6 @@ export default function BookmarkDeleteDialog({
             type="button"
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
-            disabled={isDeleting}
           >
             <svg
               className="w-6 h-6"
@@ -92,55 +84,20 @@ export default function BookmarkDeleteDialog({
             </div>
           </div>
 
-          {error && (
-            <div className="text-red-600 text-sm bg-red-50 p-3 rounded-md mb-4">
-              {error}
-            </div>
-          )}
-
           <div className="flex space-x-3">
             <button
               type="button"
               onClick={onClose}
               className="flex-1 bg-gray-100 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-200 focus:outline-none transition-colors duration-200 cursor-pointer"
-              disabled={isDeleting}
             >
               キャンセル
             </button>
             <button
               type="button"
               onClick={handleDelete}
-              disabled={isDeleting}
-              className="flex-1 bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-200 cursor-pointer"
+              className="flex-1 bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none transition-colors duration-200 cursor-pointer"
             >
-              {isDeleting ? (
-                <span className="flex items-center justify-center">
-                  <svg
-                    className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <title>削除中</title>
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    ></circle>
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
-                  </svg>
-                  削除中...
-                </span>
-              ) : (
-                '削除'
-              )}
+              削除
             </button>
           </div>
         </div>
