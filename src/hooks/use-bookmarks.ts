@@ -65,12 +65,12 @@ export function useBookmarks(filters?: BookmarkFilters) {
     async (data: { url: string; title?: string; description?: string }) => {
       // 1. 一時IDでtemp entryを即座に作成（真の楽観的更新）
       const tempId = `temp-${crypto.randomUUID()}`
-      const tempBookmark: Bookmark = {
+      const tempBookmark: Bookmark & { isLoading?: boolean } = {
         id: tempId,
         url: data.url,
         canonical_url: data.url, // 一時的：APIレスポンスで正式な値に置換
-        title: data.title || 'Untitled',
-        description: data.description || '',
+        title: data.title || null, // スケルトンUI用にnullに変更
+        description: data.description || null,
         memo: null,
         thumbnail_url: null,
         is_favorite: false,
@@ -80,6 +80,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         user_id: '', // 一時的：APIレスポンスで正式な値に置換
+        isLoading: true, // スケルトンUI表示フラグ
       }
 
       // 2. 即座にUI更新（楽観的更新）

@@ -25,6 +25,9 @@ export default function BookmarkCard({
   // const [isDeleting, setIsDeleting] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
 
+  // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
+  const isLoadingBookmark = bookmark.id.startsWith('temp-') || (bookmark as any).isLoading
+
   const handleDelete = async () => {
     const confirmed = window.confirm('このブックマークを削除しますか？')
     if (!confirmed) return
@@ -160,9 +163,16 @@ export default function BookmarkCard({
         {/* カードコンテンツ */}
         <div className="p-4 flex-1 flex flex-col">
           {/* タイトル */}
-          <h3 className="text-base font-medium text-gray-900 line-clamp-2 mb-2">
-            {bookmark.title || 'タイトルなし'}
-          </h3>
+          {isLoadingBookmark ? (
+            <div className="space-y-2 mb-2">
+              <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-4 bg-gray-200 rounded animate-pulse w-3/4"></div>
+            </div>
+          ) : (
+            <h3 className="text-base font-medium text-gray-900 line-clamp-2 mb-2">
+              {bookmark.title || 'タイトルなし'}
+            </h3>
+          )}
 
           {/* URL */}
           <div className="text-xs text-blue-600 truncate mb-2">
@@ -170,10 +180,18 @@ export default function BookmarkCard({
           </div>
 
           {/* 説明文 */}
-          {bookmark.description && (
-            <p className="text-sm text-gray-700 line-clamp-3 mb-3">
-              {bookmark.description}
-            </p>
+          {isLoadingBookmark ? (
+            <div className="space-y-1 mb-3">
+              <div className="h-3 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-3 bg-gray-200 rounded animate-pulse w-5/6"></div>
+              <div className="h-3 bg-gray-200 rounded animate-pulse w-2/3"></div>
+            </div>
+          ) : (
+            bookmark.description && (
+              <p className="text-sm text-gray-700 line-clamp-3 mb-3">
+                {bookmark.description}
+              </p>
+            )
           )}
 
           {/* メモ */}
