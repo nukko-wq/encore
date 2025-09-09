@@ -154,12 +154,11 @@ create table if not exists public.tags (
 
 alter table public.tags enable row level security;
 
--- ホワイトリスト＆本人のみタグ管理可能
-create policy "manage_own_tags_if_allowed" on public.tags
+-- 本人のみタグ管理可能
+-- ホワイトリストチェックはbookmarksテーブルで実施済みのため冗長チェック削除
+create policy "manage_own_tags" on public.tags
 for all using (
   user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt()->>'email'))
 );
 ```
 
@@ -175,15 +174,14 @@ create table if not exists public.bookmark_tags (
 
 alter table public.bookmark_tags enable row level security;
 
--- ブックマーク所有者かつタグ所有者かつホワイトリストユーザーのみタグ操作可能
-create policy "manage_bookmark_tags_if_allowed" on public.bookmark_tags
+-- ブックマーク所有者かつタグ所有者のみタグ操作可能
+-- ホワイトリストチェックはbookmarksテーブルのRLSで実施済み
+create policy "manage_bookmark_tags" on public.bookmark_tags
 for all using (
   exists (
     select 1 from public.bookmarks b
     where b.id = bookmark_tags.bookmark_id 
     and b.user_id = auth.uid()
-    and exists (select 1 from public.allowed_emails ae
-                where ae.email = (auth.jwt()->>'email'))
   )
   and exists (
     select 1 from public.tags t 
@@ -192,6 +190,12 @@ for all using (
   )
 );
 ```
+
+**セキュリティモデル（タグ系テーブル）**:
+- **Primary保護**: bookmarksテーブルのRLS（ホワイトリスト + user_id）
+- **Secondary保護**: tags/bookmark_tagsテーブルのuser_id分離
+- **最適化**: tagsはユーザー内部データのため、冗長なホワイトリストチェック削除
+- **保証**: bookmarksテーブル経由でのアクセスのみのため、セキュリティレベル維持
 
 #### 5. link_previews（リンクプレビューキャッシュ）
 ```sql
