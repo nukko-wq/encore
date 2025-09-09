@@ -71,10 +71,8 @@ export default function BookmarkCard({
         <MenuTrigger isOpen={isMenuOpen} onOpenChange={setIsMenuOpen}>
           <Button
             aria-label="ブックマークアクション"
-            className={`w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer ${
-              isMenuOpen
-                ? 'opacity-100'
-                : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
+            className={`w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center outline-none cursor-pointer ${
+              isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}
             onPress={() => {
               // メニューボタンクリック時は何もしない（メニューを開く）
