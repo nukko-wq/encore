@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase-client'
 import type { Bookmark, BookmarkFilters } from '@/types/database'
 
 export function useBookmarks(filters?: BookmarkFilters) {
@@ -58,55 +57,6 @@ export function useBookmarks(filters?: BookmarkFilters) {
     fetchBookmarks()
   }, [fetchBookmarks])
 
-  // Supabase Realtimeでリアルタイム更新（ユーザースコープ絞り込み）
-  useEffect(() => {
-    const setupRealtime = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) return
-
-      const channel = supabase
-        .channel('bookmarks-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'bookmarks',
-            filter: `user_id=eq.${user.id}`, // ユーザースコープでフィルタ
-          },
-          (payload) => {
-            if (payload.eventType === 'INSERT') {
-              setBookmarks((prev) => [payload.new as Bookmark, ...prev])
-            } else if (payload.eventType === 'UPDATE') {
-              setBookmarks((prev) =>
-                prev.map((bookmark) =>
-                  bookmark.id === payload.new.id
-                    ? (payload.new as Bookmark)
-                    : bookmark,
-                ),
-              )
-            } else if (payload.eventType === 'DELETE') {
-              setBookmarks((prev) =>
-                prev.filter((bookmark) => bookmark.id !== payload.old.id),
-              )
-            }
-          },
-        )
-        .subscribe()
-
-      return () => {
-        channel.unsubscribe()
-      }
-    }
-
-    const cleanup = setupRealtime()
-    return () => {
-      cleanup.then((cleanupFn) => cleanupFn?.())
-    }
-  }, [])
-
   const createBookmark = async (data: {
     url: string
     title?: string
@@ -127,8 +77,16 @@ export function useBookmarks(filters?: BookmarkFilters) {
       }
 
       const result = await response.json()
-      // Realtimeで自動更新されるので、手動更新は不要
-      return result.data
+      const newBookmark = result.data
+
+      // 手動でローカル状態を更新（リストの先頭に追加）- 即時反映
+      setBookmarks((prev) => [newBookmark, ...prev])
+      setError(null)
+
+      // 後追いで正確な一覧を再取得（ページング/ソート整合性確保）
+      fetchBookmarks()
+
+      return newBookmark
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'ブックマークの作成に失敗しました',
@@ -138,6 +96,14 @@ export function useBookmarks(filters?: BookmarkFilters) {
   }
 
   const updateBookmark = async (id: string, updates: Partial<Bookmark>) => {
+    // 楽観的更新：即座にローカル状態を更新
+    const previousBookmarks = bookmarks
+    setBookmarks((prev) =>
+      prev.map((bookmark) =>
+        bookmark.id === id ? { ...bookmark, ...updates } : bookmark,
+      ),
+    )
+
     try {
       const response = await fetch(`/api/bookmarks/${id}`, {
         method: 'PATCH',
@@ -153,8 +119,23 @@ export function useBookmarks(filters?: BookmarkFilters) {
       }
 
       const result = await response.json()
-      return result.data
+      const updatedBookmark = result.data
+
+      // サーバーからの正式な結果で状態を更新
+      setBookmarks((prev) =>
+        prev.map((bookmark) =>
+          bookmark.id === id ? updatedBookmark : bookmark,
+        ),
+      )
+      setError(null)
+
+      // 後追いで正確な一覧を再取得（フィルタやソートの整合性確保）
+      fetchBookmarks()
+
+      return updatedBookmark
     } catch (err) {
+      // エラー時は前の状態に戻す（ロールバック）
+      setBookmarks(previousBookmarks)
       setError(
         err instanceof Error ? err.message : 'ブックマークの更新に失敗しました',
       )
@@ -163,6 +144,10 @@ export function useBookmarks(filters?: BookmarkFilters) {
   }
 
   const deleteBookmark = async (id: string) => {
+    // 楽観的更新：即座にローカル状態から削除
+    const previousBookmarks = bookmarks
+    setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+
     try {
       const response = await fetch(`/api/bookmarks/${id}`, {
         method: 'DELETE',
@@ -172,7 +157,14 @@ export function useBookmarks(filters?: BookmarkFilters) {
         const result = await response.json()
         throw new Error(result.error || 'ブックマークの削除に失敗しました')
       }
+
+      setError(null)
+
+      // 後追いで正確な一覧を再取得（整合性確保）
+      fetchBookmarks()
     } catch (err) {
+      // エラー時は前の状態に戻す（ロールバック）
+      setBookmarks(previousBookmarks)
       setError(
         err instanceof Error ? err.message : 'ブックマークの削除に失敗しました',
       )

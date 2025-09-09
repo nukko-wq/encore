@@ -1,20 +1,23 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { useBookmarks } from '@/hooks/use-bookmarks'
+import type { Bookmark } from '@/types/database'
 
 interface BookmarkFormProps {
   onSuccess?: () => void
   onClose?: () => void
+  createBookmark: (data: {
+    url: string
+    title?: string
+    description?: string
+  }) => Promise<Bookmark>
 }
 
 export default function BookmarkForm({
   onSuccess,
   onClose,
+  createBookmark,
 }: BookmarkFormProps) {
-  const router = useRouter()
-  const { createBookmark, error: hookError } = useBookmarks()
   const [url, setUrl] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
@@ -40,8 +43,6 @@ export default function BookmarkForm({
 
       if (onSuccess) {
         onSuccess()
-      } else {
-        router.refresh() // ページを再読み込み
       }
 
       if (onClose) {
@@ -111,9 +112,9 @@ export default function BookmarkForm({
               />
             </div>
 
-            {(error || hookError) && (
+            {error && (
               <div className="text-red-600 text-sm bg-red-50 p-3 rounded-md">
-                {error || hookError}
+                {error}
               </div>
             )}
 

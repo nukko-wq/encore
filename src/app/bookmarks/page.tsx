@@ -10,7 +10,12 @@ import { useBookmarks } from '@/hooks/use-bookmarks'
 import type { Bookmark } from '@/types/database'
 
 export default function BookmarksPage() {
-  const { bookmarks, loading: isLoading, error } = useBookmarks()
+  const {
+    bookmarks,
+    loading: isLoading,
+    error,
+    createBookmark,
+  } = useBookmarks()
   const [showModal, setShowModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
@@ -188,6 +193,7 @@ export default function BookmarksPage() {
         <BookmarkForm
           onSuccess={handleBookmarkCreated}
           onClose={() => setShowModal(false)}
+          createBookmark={createBookmark}
         />
       )}
 
