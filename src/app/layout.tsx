@@ -16,6 +16,19 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'Encore - ブックマーク管理システム',
   description: '高機能なブックマーク管理システム',
+  manifest: '/site.webmanifest',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/android-chrome-512x512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: {
+      url: '/apple-touch-icon.png',
+      sizes: '180x180',
+      type: 'image/png',
+    },
+  },
   robots: {
     index: false,
     follow: false,
