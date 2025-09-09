@@ -4,7 +4,6 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import {
   Button,
   Popover,
-  OverlayArrow,
 } from 'react-aria-components'
 import { useBookmarkTags } from '@/hooks/use-bookmark-tags'
 import { useTagSearch } from '@/hooks/use-tag-search'
@@ -122,11 +121,6 @@ export default function BookmarkTagManager({
       offset={8}
       className="min-w-80 max-w-96 bg-white rounded-lg shadow-xl ring-1 ring-black/5 entering:animate-in entering:fade-in-0 entering:zoom-in-95 exiting:animate-out exiting:fade-out-0 exiting:zoom-out-95 fill-mode-forwards outline-none"
     >
-      <OverlayArrow className="fill-white">
-        <svg width={12} height={12} viewBox="0 0 12 12">
-          <path d="m0 0 6 6 6-6" />
-        </svg>
-      </OverlayArrow>
       <div
         ref={popoverRef}
         role="dialog"
