@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { bookmarkService } from '@/lib/services/bookmarks'
 import { validateApiAuth } from '@/lib/supabase-server'
+import { normalizeUrl } from '@/lib/url-normalization'
 
 // PATCH /api/bookmarks/[id] - ブックマーク更新
 export async function PATCH(
@@ -28,6 +29,8 @@ export async function PATCH(
 
     // 更新データのバリデーション（少なくとも1つのフィールドが必要）
     const allowedFields = [
+      'url',
+      'canonical_url',
       'title',
       'description',
       'memo',
@@ -52,6 +55,15 @@ export async function PATCH(
         { error: '更新するデータが指定されていません' },
         { status: 400 },
       )
+    }
+
+    // URLが更新される場合、canonical_urlも自動的に正規化
+    if (updates.url && typeof updates.url === 'string') {
+      try {
+        updates.canonical_url = normalizeUrl(updates.url)
+      } catch (_error) {
+        return NextResponse.json({ error: '無効なURLです' }, { status: 400 })
+      }
     }
 
     // ブックマーク更新
