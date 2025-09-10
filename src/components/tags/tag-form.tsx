@@ -4,7 +4,6 @@ import { useCallback, useState } from 'react'
 import { type TagRow, useTags } from '@/hooks/use-tags'
 
 interface TagFormProps {
-  parentTagId?: string
   editingTag?: TagRow | null
   onSuccess?: () => void
   onCancel?: () => void
@@ -24,7 +23,6 @@ const COLOR_PRESETS = [
 ]
 
 export default function TagForm({
-  parentTagId,
   editingTag,
   onSuccess,
   onCancel,
@@ -55,7 +53,6 @@ export default function TagForm({
           await createTag({
             name: name.trim(),
             color,
-            parent_tag_id: parentTagId ?? null,
             display_order: 0,
           })
         }
@@ -72,7 +69,7 @@ export default function TagForm({
         setIsSubmitting(false)
       }
     },
-    [name, color, editingTag, updateTag, createTag, parentTagId, onSuccess],
+    [name, color, editingTag, updateTag, createTag, onSuccess],
   )
 
   const handleCancel = useCallback(() => {

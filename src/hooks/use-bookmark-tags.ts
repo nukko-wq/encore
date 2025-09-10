@@ -93,7 +93,6 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
             id,
             name,
             color,
-            parent_tag_id,
             display_order,
             created_at
           )
@@ -163,7 +162,6 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
               id,
               name,
               color,
-              parent_tag_id,
               display_order,
               created_at
             )

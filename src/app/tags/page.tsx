@@ -9,13 +9,10 @@ import TagsTree from '@/components/tags/tags-tree'
 import { type TagRow, useTags } from '@/hooks/use-tags'
 
 export default function TagsPage() {
-  const { tags, tagsTree, loading: isLoading, error } = useTags()
+  const { tags, loading: isLoading, error } = useTags()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingTag, setEditingTag] = useState<TagRow | null>(null)
-  const [selectedParentId, setSelectedParentId] = useState<string | undefined>(
-    undefined,
-  )
   const [selectedTagId, setSelectedTagId] = useState<string | undefined>(
     undefined,
   )
@@ -38,13 +35,11 @@ export default function TagsPage() {
   }, [])
 
   const handleCreateTag = () => {
-    setSelectedParentId(selectedTagId)
     setShowCreateModal(true)
   }
 
   const handleTagCreated = () => {
     setShowCreateModal(false)
-    setSelectedParentId(undefined)
   }
 
   const handleTagSelect = (tagId: string) => {
@@ -119,7 +114,7 @@ export default function TagsPage() {
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">タグ管理</h1>
                 <p className="mt-1 text-sm text-gray-600">
-                  階層タグの作成・編集・整理を行います
+                  タグの作成・編集・整理を行います
                 </p>
               </div>
               <div className="flex space-x-3">
@@ -288,15 +283,6 @@ export default function TagsPage() {
                         </p>
                       </div>
 
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          ルートタグ数
-                        </label>
-                        <p className="mt-1 text-2xl font-semibold text-gray-900">
-                          {tagsTree.length}
-                        </p>
-                      </div>
-
                       {tags.length > 0 && (
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -365,7 +351,6 @@ export default function TagsPage() {
             </div>
             <div className="p-6">
               <TagForm
-                parentTagId={selectedParentId}
                 onSuccess={handleTagCreated}
                 onCancel={() => setShowCreateModal(false)}
               />

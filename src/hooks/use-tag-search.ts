@@ -92,7 +92,6 @@ export function useTagSearch(): TagSearchResult {
         const newTag = await createTag({
           name: name.trim(),
           color,
-          parent_tag_id: null,
           display_order: 0,
         })
 

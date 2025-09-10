@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { type TagRow, type TagWithChildren, useTags } from '@/hooks/use-tags'
+import { useCallback, useState } from 'react'
+import { type TagRow, useTags } from '@/hooks/use-tags'
 
 interface TagsTreeProps {
   onTagSelect?: (tagId: string) => void
@@ -14,36 +14,8 @@ export default function TagsTree({
   selectedTagId,
   onTagEdit,
 }: TagsTreeProps) {
-  const { tagsTree, loading, error, updateTag, deleteTag, reorderTags } =
-    useTags()
+  const { tags, loading, error, deleteTag } = useTags()
   const [draggedTag, setDraggedTag] = useState<string | null>(null)
-  const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set())
-
-  // タグツリーが更新されたときに、子を持つルートタグを自動展開
-  useEffect(() => {
-    if (tagsTree.length > 0) {
-      const newExpandedTags = new Set<string>()
-      tagsTree.forEach((rootTag) => {
-        if (rootTag.children && rootTag.children.length > 0) {
-          newExpandedTags.add(rootTag.id)
-        }
-      })
-      setExpandedTags(newExpandedTags)
-    }
-  }, [tagsTree])
-
-  // タグの展開/折りたたみ
-  const toggleExpand = useCallback((tagId: string) => {
-    setExpandedTags((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(tagId)) {
-        newSet.delete(tagId)
-      } else {
-        newSet.add(tagId)
-      }
-      return newSet
-    })
-  }, [])
 
   // ドラッグ開始
   const handleDragStart = useCallback((e: React.DragEvent, tagId: string) => {
@@ -52,33 +24,24 @@ export default function TagsTree({
     e.dataTransfer.effectAllowed = 'move'
   }, [])
 
-  // ドロップ処理
+  // ドロップ処理（並び順変更のみサポート）
   const handleDrop = useCallback(
-    async (
-      e: React.DragEvent,
-      targetTagId: string,
-      position: 'before' | 'after' | 'inside',
-    ) => {
+    async (e: React.DragEvent, targetTagId: string) => {
       e.preventDefault()
       if (!draggedTag || draggedTag === targetTagId) return
 
       try {
-        if (position === 'inside') {
-          // 親子関係の変更
-          await updateTag(draggedTag, { parent_tag_id: targetTagId })
-        } else {
-          // 並び順の変更（簡略化実装）
-          console.log('Reorder:', { draggedTag, targetTagId, position })
-          // 実際の並び順変更は複雑なため、ここでは省略
-          // 必要に応じて詳細な並び順ロジックを実装
-        }
+        // 並び順の変更（簡略化実装）
+        console.log('Reorder:', { draggedTag, targetTagId })
+        // 実際の並び順変更は複雑なため、ここでは省略
+        // 必要に応じて詳細な並び順ロジックを実装
       } catch (error) {
         console.error('Failed to move tag:', error)
       } finally {
         setDraggedTag(null)
       }
     },
-    [draggedTag, updateTag],
+    [draggedTag],
   )
 
   // ドラッグオーバー
@@ -103,40 +66,21 @@ export default function TagsTree({
 
   // 個別タグレンダリング
   const renderTag = useCallback(
-    (tag: TagWithChildren) => {
-      const hasChildren = tag.children && tag.children.length > 0
-      const isExpanded = expandedTags.has(tag.id)
+    (tag: TagRow) => {
       const isSelected = selectedTagId === tag.id
 
       return (
         <div key={tag.id} className="tag-item">
           <div
-            className={`flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer transition-colors ${
+            className={`flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer transition-colors group ${
               isSelected ? 'bg-blue-100 hover:bg-blue-150' : ''
             }`}
-            style={{ marginLeft: `${tag.level * 20}px` }}
             draggable
             onDragStart={(e) => handleDragStart(e, tag.id)}
-            onDrop={(e) => handleDrop(e, tag.id, 'inside')}
+            onDrop={(e) => handleDrop(e, tag.id)}
             onDragOver={handleDragOver}
             onClick={() => onTagSelect?.(tag.id)}
           >
-            {/* 展開/折りたたみボタン */}
-            {hasChildren && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  toggleExpand(tag.id)
-                }}
-                className="w-4 h-4 flex items-center justify-center text-gray-500 hover:text-gray-700"
-                aria-label={isExpanded ? 'タグを折りたたむ' : 'タグを展開'}
-              >
-                {isExpanded ? '▼' : '▶'}
-              </button>
-            )}
-            {!hasChildren && <div className="w-4" />}
-
             {/* タグカラー */}
             <div
               className="w-3 h-3 rounded-full flex-shrink-0"
@@ -178,36 +122,28 @@ export default function TagsTree({
               </button>
             </div>
           </div>
-
-          {/* 子タグの再帰レンダリング */}
-          {hasChildren && isExpanded && (
-            <div className="tag-children">{tag.children?.map(renderTag)}</div>
-          )}
         </div>
       )
     },
     [
-      expandedTags,
       selectedTagId,
       handleDragStart,
       handleDrop,
       handleDragOver,
       onTagSelect,
       onTagEdit,
-      toggleExpand,
       handleDeleteTag,
     ],
   )
 
   if (loading) {
     return (
-      <div className="tags-tree">
-        <h3 className="text-lg font-semibold mb-4">タグ階層</h3>
+      <div className="tags-list">
+        <h3 className="text-lg font-semibold mb-4">タグ一覧</h3>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="animate-pulse">
               <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-              <div className="h-4 bg-gray-200 rounded w-1/2 ml-6"></div>
             </div>
           ))}
         </div>
@@ -217,21 +153,21 @@ export default function TagsTree({
 
   if (error) {
     return (
-      <div className="tags-tree">
-        <h3 className="text-lg font-semibold mb-4">タグ階層</h3>
+      <div className="tags-list">
+        <h3 className="text-lg font-semibold mb-4">タグ一覧</h3>
         <div className="text-red-600 text-sm">エラー: {error}</div>
       </div>
     )
   }
 
   return (
-    <div className="tags-tree">
-      <h3 className="text-lg font-semibold mb-4">タグ階層</h3>
+    <div className="tags-list">
+      <h3 className="text-lg font-semibold mb-4">タグ一覧</h3>
 
-      {tagsTree.length === 0 ? (
+      {tags.length === 0 ? (
         <div className="text-gray-500 text-sm">タグがありません</div>
       ) : (
-        <div className="space-y-1 group">{tagsTree.map(renderTag)}</div>
+        <div className="space-y-1">{tags.map(renderTag)}</div>
       )}
     </div>
   )

@@ -8,15 +8,8 @@ export interface TagRow {
   user_id: string
   name: string
   color: string
-  parent_tag_id: string | null
   display_order: number
   created_at: string
-}
-
-// 階層構造を持つタグ型
-export interface TagWithChildren extends TagRow {
-  children?: TagWithChildren[]
-  level: number
 }
 
 // Realtime ペイロードの型定義
@@ -29,7 +22,6 @@ interface RealtimePayload {
 export function useTags() {
   const { user } = useAuth()
   const [tags, setTags] = useState<TagRow[]>([])
-  const [tagsTree, setTagsTree] = useState<TagWithChildren[]>([])
   const [loading, setLoading] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -38,7 +30,11 @@ export function useTags() {
 
   // デバッグ: 最小限のログ
   if (process.env.NODE_ENV === 'development') {
-    console.log('🔍 useTags:', { hasUser: !!user, loading, tagsCount: tags.length })
+    console.log('🔍 useTags:', {
+      hasUser: !!user,
+      loading,
+      tagsCount: tags.length,
+    })
   }
 
   // stale closure対策：常に最新のtags状態をrefで保持
@@ -55,16 +51,14 @@ export function useTags() {
         .from('tags')
         .select('*')
         .eq('user_id', user.id)
-        .order('parent_tag_id', { ascending: true, nullsFirst: true }) // 親タグを先に
-        .order('display_order', { ascending: true }) // 同階層内の順序
+        .order('display_order', { ascending: true }) // 表示順序
 
       if (error) throw error
 
       const tagData = data || []
       setTags(tagData)
-      setTagsTree(buildTagTree(tagData))
       setError(null)
-      
+
       if (process.env.NODE_ENV === 'development') {
         console.log('✅ Tags fetched successfully:', { count: tagData.length })
       }
@@ -90,7 +84,9 @@ export function useTags() {
     const fallbackTimeout = setTimeout(() => {
       console.warn('⚠️ Loading timeout reached, forcing loading to false')
       setLoading(false)
-      setError('タグの読み込みがタイムアウトしました。ページをリロードしてください。')
+      setError(
+        'タグの読み込みがタイムアウトしました。ページをリロードしてください。',
+      )
     }, 10000)
 
     return () => clearTimeout(fallbackTimeout)
@@ -137,15 +133,14 @@ export function useTags() {
                 case 'DELETE': {
                   if (!realtimePayload.old) return
                   const deletedTag = realtimePayload.old
-                  console.log('🗑️ Processing DELETE event for tag:', deletedTag.id)
+                  console.log(
+                    '🗑️ Processing DELETE event for tag:',
+                    deletedTag.id,
+                  )
 
                   setTags((current) => {
                     console.log('✅ Removing tag from state via Realtime')
-                    const updated = current.filter(
-                      (t) => t.id !== deletedTag.id,
-                    )
-                    setTagsTree(buildTagTree(updated))
-                    return updated
+                    return current.filter((t) => t.id !== deletedTag.id)
                   })
                   break
                 }
@@ -167,9 +162,7 @@ export function useTags() {
                     }
 
                     console.log('✨ Adding new tag from Realtime:', newTag.id)
-                    const updated = [...current, newTag]
-                    setTagsTree(buildTagTree(updated))
-                    return updated
+                    return [...current, newTag]
                   })
                   break
                 }
@@ -177,15 +170,16 @@ export function useTags() {
                 case 'UPDATE': {
                   if (!realtimePayload.new) return
                   const updatedTag = realtimePayload.new
-                  console.log('✏️ Processing UPDATE event for tag:', updatedTag.id)
+                  console.log(
+                    '✏️ Processing UPDATE event for tag:',
+                    updatedTag.id,
+                  )
 
                   setTags((current) => {
                     console.log('✅ Applying tag update from Realtime')
-                    const updated = current.map((t) =>
+                    return current.map((t) =>
                       t.id === updatedTag.id ? updatedTag : t,
                     )
-                    setTagsTree(buildTagTree(updated))
-                    return updated
                   })
                   break
                 }
@@ -242,18 +236,12 @@ export function useTags() {
   }, [user])
 
   const createTag = useCallback(
-    async (data: {
-      name: string
-      color?: string
-      parent_tag_id?: string | null
-      display_order?: number
-    }) => {
+    async (data: { name: string; color?: string; display_order?: number }) => {
       if (!user) throw new Error('認証が必要です')
 
       console.log('🚀 Creating tag via API:', {
         name: data.name,
         color: data.color || '#6366f1',
-        parent_tag_id: data.parent_tag_id
       })
 
       setIsCreating(true)
@@ -273,7 +261,7 @@ export function useTags() {
         console.log('✅ Tag created successfully:', {
           id: newTag.id,
           name: newTag.name,
-          message: 'Waiting for Realtime event to update UI...'
+          message: 'Waiting for Realtime event to update UI...',
         })
 
         return newTag
@@ -295,7 +283,7 @@ export function useTags() {
 
       console.log('🚀 Updating tag via API:', {
         id,
-        updates
+        updates,
       })
 
       setIsUpdating(true)
@@ -313,7 +301,7 @@ export function useTags() {
         console.log('✅ Tag updated successfully:', {
           id: updatedTag.id,
           name: updatedTag.name,
-          message: 'Waiting for Realtime event to update UI...'
+          message: 'Waiting for Realtime event to update UI...',
         })
 
         return updatedTag
@@ -347,7 +335,7 @@ export function useTags() {
 
         console.log('✅ Tag deleted successfully:', {
           id,
-          message: 'Waiting for Realtime event to update UI...'
+          message: 'Waiting for Realtime event to update UI...',
         })
       } catch (err) {
         const errorMessage =
@@ -390,7 +378,6 @@ export function useTags() {
 
   return {
     tags,
-    tagsTree,
     loading,
     isCreating,
     isUpdating,
@@ -402,43 +389,4 @@ export function useTags() {
     reorderTags,
     refetch: fetchTags,
   }
-}
-
-// タグ階層ツリー構築ユーティリティ関数
-function buildTagTree(tags: TagRow[]): TagWithChildren[] {
-  const tagMap = new Map<string, TagWithChildren>()
-  const rootTags: TagWithChildren[] = []
-
-  // 1. マップ作成（全タグを初期化）
-  tags.forEach((tag) => {
-    tagMap.set(tag.id, { ...tag, children: [], level: 0 })
-  })
-
-  // 2. 階層構築
-  tags.forEach((tag) => {
-    const tagWithChildren = tagMap.get(tag.id)
-    if (!tagWithChildren) return
-
-    if (tag.parent_tag_id) {
-      // 子タグの場合
-      const parent = tagMap.get(tag.parent_tag_id)
-      if (parent) {
-        parent.children = parent.children || []
-        parent.children.push(tagWithChildren)
-        tagWithChildren.level = parent.level + 1
-
-        // 親タグ内でdisplay_orderでソート
-        parent.children.sort((a, b) => a.display_order - b.display_order)
-      } else {
-      }
-    } else {
-      // ルートタグの場合
-      rootTags.push(tagWithChildren)
-    }
-  })
-
-  // 3. ルートレベルでもdisplay_orderでソート
-  rootTags.sort((a, b) => a.display_order - b.display_order)
-
-  return rootTags
 }

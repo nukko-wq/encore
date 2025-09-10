@@ -171,6 +171,5 @@ export interface BookmarkWithTags extends Bookmark {
     id: string
     name: string
     color: string
-    parent_tag_id: string | null
   }[]
 }
