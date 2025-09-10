@@ -24,45 +24,59 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
   const [error, setError] = useState<string | null>(null)
 
   // 権限確認のヘルパー関数
-  const verifyPermissions = useCallback(async (tagId: string) => {
-    if (!user || !bookmarkId) return { canAccess: false, reason: '認証が必要です' }
+  const verifyPermissions = useCallback(
+    async (tagId: string) => {
+      if (!user || !bookmarkId)
+        return { canAccess: false, reason: '認証が必要です' }
 
-    try {
-      console.log('🔍 Verifying permissions for:', { tagId, bookmarkId, userId: user.id })
+      try {
+        console.log('🔍 Verifying permissions for:', {
+          tagId,
+          bookmarkId,
+          userId: user.id,
+        })
 
-      // ブックマークの権限確認
-      const { data: bookmarkData, error: bookmarkError } = await supabase
-        .from('bookmarks')
-        .select('id, user_id')
-        .eq('id', bookmarkId)
-        .eq('user_id', user.id)
-        .single()
+        // ブックマークの権限確認
+        const { data: bookmarkData, error: bookmarkError } = await supabase
+          .from('bookmarks')
+          .select('id, user_id')
+          .eq('id', bookmarkId)
+          .eq('user_id', user.id)
+          .single()
 
-      if (bookmarkError || !bookmarkData) {
-        console.log('❌ Bookmark access denied:', bookmarkError)
-        return { canAccess: false, reason: 'ブックマークにアクセスできません' }
+        if (bookmarkError || !bookmarkData) {
+          console.log('❌ Bookmark access denied:', bookmarkError)
+          return {
+            canAccess: false,
+            reason: 'ブックマークにアクセスできません',
+          }
+        }
+
+        // タグの権限確認
+        const { data: tagData, error: tagError } = await supabase
+          .from('tags')
+          .select('id, user_id, name')
+          .eq('id', tagId)
+          .eq('user_id', user.id)
+          .single()
+
+        if (tagError || !tagData) {
+          console.log('❌ Tag access denied:', tagError)
+          return { canAccess: false, reason: 'タグにアクセスできません' }
+        }
+
+        console.log('✅ Permissions verified:', {
+          bookmark: bookmarkData,
+          tag: tagData,
+        })
+        return { canAccess: true, reason: 'OK' }
+      } catch (err) {
+        console.error('💥 Permission verification failed:', err)
+        return { canAccess: false, reason: '権限確認に失敗しました' }
       }
-
-      // タグの権限確認
-      const { data: tagData, error: tagError } = await supabase
-        .from('tags')
-        .select('id, user_id, name')
-        .eq('id', tagId)
-        .eq('user_id', user.id)
-        .single()
-
-      if (tagError || !tagData) {
-        console.log('❌ Tag access denied:', tagError)
-        return { canAccess: false, reason: 'タグにアクセスできません' }
-      }
-
-      console.log('✅ Permissions verified:', { bookmark: bookmarkData, tag: tagData })
-      return { canAccess: true, reason: 'OK' }
-    } catch (err) {
-      console.error('💥 Permission verification failed:', err)
-      return { canAccess: false, reason: '権限確認に失敗しました' }
-    }
-  }, [user, bookmarkId])
+    },
+    [user, bookmarkId],
+  )
 
   const fetchBookmarkTags = useCallback(async () => {
     if (!user || !bookmarkId) return
@@ -156,7 +170,7 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
       console.log('🏷️ Adding tag to bookmark:', {
         tagId,
         bookmarkId,
-        userId: user.id
+        userId: user.id,
       })
 
       // 既に追加済みかチェック
@@ -199,7 +213,7 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
             message: error.message,
             code: error.code,
             details: error.details,
-            hint: error.hint
+            hint: error.hint,
           })
           throw error
         }
@@ -216,9 +230,9 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
           error: err,
           tagId,
           bookmarkId,
-          userId: user.id
+          userId: user.id,
         })
-        
+
         const errorMessage =
           err instanceof Error ? err.message : 'タグの追加に失敗しました'
         setError(errorMessage)
