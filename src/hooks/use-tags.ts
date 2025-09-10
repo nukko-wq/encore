@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/components/common/auth-provider'
+import { supabase } from '@/lib/supabase'
 
 // タグの基本型（database.tsから取得予定）
 export interface TagRow {
@@ -60,75 +60,6 @@ export function useTags() {
     }
   }, [fetchTags, user])
 
-  // Supabase Realtimeでリアルタイム更新（ユーザースコープ絞り込み）
-  useEffect(() => {
-    if (!user) return
-
-    const setupRealtime = () => {
-      const channel = supabase
-        .channel(`tags-changes-${user.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'tags',
-            filter: `user_id=eq.${user.id}`, // ユーザースコープでフィルタ
-          },
-          (payload) => {
-            try {
-              console.log('Realtime tag change received:', payload)
-              console.log(
-                'Processing tag event:',
-                payload.eventType,
-                'for tag:',
-                payload.new?.id || payload.old?.id,
-              )
-
-              // タグ更新時は階層構造を再構築するため全データを再取得
-              fetchTags()
-            } catch (error) {
-              console.error(
-                'Error processing realtime tag change:',
-                error,
-                payload,
-              )
-            }
-          },
-        )
-        .subscribe((status, err) => {
-          console.log('📡 Tag realtime subscription status:', status)
-
-          if (status === 'SUBSCRIBED') {
-            console.log('✅ Tag realtime connected successfully')
-          } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Tag realtime channel error:', err)
-            setError('タグのリアルタイム接続でエラーが発生しました')
-          } else if (status === 'TIMED_OUT') {
-            console.error('⏰ Tag realtime connection timed out')
-            setError('タグのリアルタイム接続がタイムアウトしました')
-          } else if (status === 'CLOSED') {
-            console.warn('🔐 Tag realtime connection closed')
-          } else if (status === 'CONNECTING') {
-            console.log('🔄 Connecting to tag realtime...')
-          } else {
-            console.log('📊 Tag realtime status:', status)
-          }
-
-          if (err) {
-            console.error('📛 Tag realtime error details:', err)
-          }
-        })
-
-      return () => {
-        console.log('Unsubscribing from tag realtime channel')
-        channel.unsubscribe()
-      }
-    }
-
-    const cleanup = setupRealtime()
-    return cleanup
-  }, [user, fetchTags])
 
   const createTag = useCallback(
     async (data: {

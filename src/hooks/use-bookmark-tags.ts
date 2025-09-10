@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/components/common/auth-provider'
-import type { BookmarkTag, CreateBookmarkTagData } from '@/types/database'
+import { supabase } from '@/lib/supabase'
+import type { BookmarkTag } from '@/types/database'
 import type { TagRow } from './use-tags'
 
 interface BookmarkTagsResult {
@@ -125,77 +125,6 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
     }
   }, [fetchBookmarkTags, user, bookmarkId])
 
-  // Supabase Realtimeでリアルタイム更新
-  useEffect(() => {
-    if (!user || !bookmarkId) return
-
-    const setupRealtime = () => {
-      const channel = supabase
-        .channel(`bookmark-tags-${bookmarkId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'bookmark_tags',
-            filter: `bookmark_id=eq.${bookmarkId}`,
-          },
-          (payload) => {
-            try {
-              console.log('Realtime bookmark_tags change received:', payload)
-              console.log(
-                'Processing bookmark_tags event:',
-                payload.eventType,
-                'for bookmark:',
-                bookmarkId,
-              )
-
-              // 楽観的更新と競合しないよう、少し遅延して再取得
-              setTimeout(() => {
-                fetchBookmarkTags()
-              }, 500)
-            } catch (error) {
-              console.error(
-                'Error processing realtime bookmark_tags change:',
-                error,
-                payload,
-              )
-            }
-          },
-        )
-        .subscribe((status, err) => {
-          console.log('📡 Bookmark tags realtime subscription status:', status)
-
-          if (status === 'SUBSCRIBED') {
-            console.log('✅ Bookmark tags realtime connected successfully')
-          } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Bookmark tags realtime channel error:', err)
-            setError('ブックマークタグのリアルタイム接続でエラーが発生しました')
-          } else if (status === 'TIMED_OUT') {
-            console.error('⏰ Bookmark tags realtime connection timed out')
-            setError('ブックマークタグのリアルタイム接続がタイムアウトしました')
-          } else if (status === 'CLOSED') {
-            console.warn('🔐 Bookmark tags realtime connection closed')
-          } else if (status === 'CONNECTING') {
-            console.log('🔄 Connecting to bookmark tags realtime...')
-          } else {
-            console.log('📊 Bookmark tags realtime status:', status)
-          }
-
-          if (err) {
-            console.error('📛 Bookmark tags realtime error details:', err)
-          }
-        })
-
-      return () => {
-        console.log('Unsubscribing from bookmark tags realtime channel')
-        channel.unsubscribe()
-      }
-    }
-
-    const cleanup = setupRealtime()
-    return cleanup
-  }, [user, bookmarkId, fetchBookmarkTags])
 
   // タグ追加（楽観的更新）
   const addTag = useCallback(
@@ -255,7 +184,7 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
 
         console.log('✅ Tag added successfully:', data)
 
-        // 成功時のみ楽観的更新（Realtimeで更新されるので実際にはこれも不要だが、UX向上のため）
+        // 成功時のみ楽観的更新
         setBookmarkTags((prev) => [...prev, data])
         if (data.tags) {
           setTags((prev) => [...prev, data.tags as TagRow])
@@ -274,7 +203,7 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
         throw new Error(errorMessage)
       }
     },
-    [user, bookmarkId, bookmarkTags],
+    [user, bookmarkId, bookmarkTags, verifyPermissions],
   )
 
   // タグ削除（楽観的更新）
