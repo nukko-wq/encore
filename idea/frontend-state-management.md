@@ -42,17 +42,22 @@ src/
     └── common.ts
 ```
 
-## 状態管理（Supabase Realtime対応）
+## 状態管理（限定的Realtime対応）
 
 ### useBookmarks Hook
 ```typescript
-// hooks/use-bookmarks.ts - Supabase Realtimeと組み合わせた状態管理
+// hooks/use-bookmarks.ts - ブックマーク一覧ページでのみRealtime購読対応
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { BookmarkService } from '@/lib/services/bookmarks'
 import type { BookmarkRow } from '@/types/database'
 
-export function useBookmarks(filters?: BookmarkFilters) {
+interface UseBookmarksOptions {
+  filters?: BookmarkFilters
+  enableRealtime?: boolean // ブックマーク一覧ページでのみRealtimeを有効化
+}
+
+export function useBookmarks({ filters, enableRealtime = false }: UseBookmarksOptions = {}) {
   const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -77,14 +82,16 @@ export function useBookmarks(filters?: BookmarkFilters) {
     fetchBookmarks()
   }, [filters])
   
-  // Supabase Realtimeでリアルタイム更新（ユーザースコープ絞り込み）
+  // ブックマーク一覧ページでのみRealtime更新を有効化
   useEffect(() => {
+    if (!enableRealtime) return
+    
     const setupRealtime = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
       const channel = supabase
-        .channel('bookmarks-changes')
+        .channel('bookmarks-list-changes')
         .on(
           'postgres_changes',
           {
@@ -116,12 +123,15 @@ export function useBookmarks(filters?: BookmarkFilters) {
     return () => {
       cleanup.then(cleanupFn => cleanupFn && cleanupFn())
     }
-  }, [])
+  }, [enableRealtime])
   
   const createBookmark = async (data: { url: string; title?: string; description?: string }) => {
     try {
       const bookmark = await bookmarkService.createBookmark(data)
-      // Realtimeで自動更新されるので、手動更新は不要
+      // 一覧ページ以外では手動でステート更新（Chrome拡張機能用）
+      if (!enableRealtime) {
+        setBookmarks(prev => [bookmark, ...prev])
+      }
       return bookmark
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create bookmark')
@@ -132,6 +142,10 @@ export function useBookmarks(filters?: BookmarkFilters) {
   const updateBookmark = async (id: string, updates: Partial<BookmarkRow>) => {
     try {
       const bookmark = await bookmarkService.updateBookmark(id, updates)
+      // 一覧ページ以外では手動でステート更新
+      if (!enableRealtime) {
+        setBookmarks(prev => prev.map(b => b.id === id ? bookmark : b))
+      }
       return bookmark
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update bookmark')
@@ -142,6 +156,10 @@ export function useBookmarks(filters?: BookmarkFilters) {
   const deleteBookmark = async (id: string) => {
     try {
       await bookmarkService.deleteBookmark(id)
+      // 一覧ページ以外では手動でステート更新
+      if (!enableRealtime) {
+        setBookmarks(prev => prev.filter(b => b.id !== id))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete bookmark')
       throw err
@@ -241,19 +259,13 @@ export const useAuth = () => {
 
 ### useTags Hook
 ```typescript
-// hooks/use-tags.ts - タグ階層管理対応
+// hooks/use-tags.ts - Realtimeなしのシンプルタグ管理
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { TagRow } from '@/types/database'
 
-interface TagWithChildren extends TagRow {
-  children?: TagWithChildren[]
-  level: number
-}
-
 export function useTags() {
   const [tags, setTags] = useState<TagRow[]>([])
-  const [tagsTree, setTagsTree] = useState<TagWithChildren[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -264,64 +276,29 @@ export function useTags() {
       const { data, error } = await supabase
         .from('tags')
         .select('*')
-        .order('parent_tag_id', { ascending: true }) // 親タグを先に
-        .order('display_order', { ascending: true })   // 同階層内の順序
+        .order('display_order', { ascending: true }) // 表示順序
 
       if (error) throw error
 
       setTags(data || [])
-      setTagsTree(buildTagTree(data || []))
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch tags')
     } finally {
       setLoading(false)
     }
-  }, []) // 依存関係は空配列
+  }, [])
 
   // 初回タグ取得
   useEffect(() => {
     fetchTags()
   }, [fetchTags])
 
-  // Realtime更新（ユーザースコープ絞り込み）
-  useEffect(() => {
-    const setupRealtime = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const channel = supabase
-        .channel('tags-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'tags',
-            filter: `user_id=eq.${user.id}` // ユーザースコープでフィルタ
-          },
-          () => {
-            // タグ更新時は再取得（階層構造のため）
-            fetchTags()
-          }
-        )
-        .subscribe()
-      
-      return () => {
-        channel.unsubscribe()
-      }
-    }
-
-    const cleanup = setupRealtime()
-    return () => {
-      cleanup.then(cleanupFn => cleanupFn && cleanupFn())
-    }
-  }, [fetchTags]) // fetchTagsを依存関係に追加
+  // Realtime更新は削除 - 手動でステート更新する方式に変更
 
   const createTag = async (data: {
     name: string
     color?: string
-    parent_tag_id?: string
     display_order?: number
   }) => {
     try {
@@ -332,6 +309,10 @@ export function useTags() {
         .single()
 
       if (error) throw error
+      
+      // 手動でステート更新
+      setTags(prev => [...prev, newTag])
+      
       return newTag
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create tag')
@@ -349,6 +330,10 @@ export function useTags() {
         .single()
 
       if (error) throw error
+      
+      // 手動でステート更新
+      setTags(prev => prev.map(tag => tag.id === id ? updatedTag : tag))
+      
       return updatedTag
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update tag')
@@ -364,6 +349,10 @@ export function useTags() {
         .eq('id', id)
 
       if (error) throw error
+      
+      // 手動でステート更新
+      setTags(prev => prev.filter(tag => tag.id !== id))
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete tag')
       throw err
@@ -379,6 +368,10 @@ export function useTags() {
           .update({ display_order: update.display_order })
           .eq('id', update.id)
       }
+      
+      // 更新後に再取得してステート更新
+      await fetchTags()
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reorder tags')
       throw err
@@ -387,43 +380,14 @@ export function useTags() {
 
   return {
     tags,
-    tagsTree,
     loading,
     error,
     createTag,
     updateTag,
     deleteTag,
-    reorderTags
+    reorderTags,
+    refetch: fetchTags
   }
-}
-
-// タグ階層ツリー構築
-function buildTagTree(tags: TagRow[]): TagWithChildren[] {
-  const tagMap = new Map<string, TagWithChildren>()
-  const rootTags: TagWithChildren[] = []
-
-  // マップ作成
-  tags.forEach(tag => {
-    tagMap.set(tag.id, { ...tag, children: [], level: 0 })
-  })
-
-  // 階層構築
-  tags.forEach(tag => {
-    const tagWithChildren = tagMap.get(tag.id)!
-    
-    if (tag.parent_tag_id) {
-      const parent = tagMap.get(tag.parent_tag_id)
-      if (parent) {
-        parent.children = parent.children || []
-        parent.children.push(tagWithChildren)
-        tagWithChildren.level = parent.level + 1
-      }
-    } else {
-      rootTags.push(tagWithChildren)
-    }
-  })
-
-  return rootTags
 }
 ```
 
@@ -434,26 +398,25 @@ function buildTagTree(tags: TagRow[]): TagWithChildren[] {
 // components/bookmarks/bookmark-card.tsx
 import { useState } from 'react'
 import { BookmarkRow } from '@/types/database'
-import { useBookmarks } from '@/hooks/use-bookmarks'
 
+// 独立したコンポーネントとして設計し、更新処理は親コンポーネントに任せる
 interface BookmarkCardProps {
   bookmark: BookmarkRow
-  onUpdate?: (bookmark: BookmarkRow) => void
+  onUpdate?: (id: string, updates: Partial<BookmarkRow>) => Promise<void>
+  onDelete?: (id: string) => Promise<void>
 }
 
-export function BookmarkCard({ bookmark, onUpdate }: BookmarkCardProps) {
-  const { updateBookmark, deleteBookmark } = useBookmarks()
+export function BookmarkCard({ bookmark, onUpdate, onDelete }: BookmarkCardProps) {
   const [isUpdating, setIsUpdating] = useState(false)
 
   const handleToggleFavorite = async () => {
-    if (isUpdating) return
+    if (isUpdating || !onUpdate) return
     
     setIsUpdating(true)
     try {
-      const updated = await updateBookmark(bookmark.id, {
+      await onUpdate(bookmark.id, {
         is_favorite: !bookmark.is_favorite
       })
-      onUpdate?.(updated)
     } catch (error) {
       console.error('Failed to toggle favorite:', error)
     } finally {
@@ -462,15 +425,14 @@ export function BookmarkCard({ bookmark, onUpdate }: BookmarkCardProps) {
   }
 
   const handleTogglePin = async () => {
-    if (isUpdating) return
+    if (isUpdating || !onUpdate) return
     
     setIsUpdating(true)
     try {
-      const updated = await updateBookmark(bookmark.id, {
+      await onUpdate(bookmark.id, {
         is_pinned: !bookmark.is_pinned,
         pinned_at: bookmark.is_pinned ? null : new Date().toISOString()
       })
-      onUpdate?.(updated)
     } catch (error) {
       console.error('Failed to toggle pin:', error)
     } finally {
@@ -479,10 +441,10 @@ export function BookmarkCard({ bookmark, onUpdate }: BookmarkCardProps) {
   }
 
   const handleDelete = async () => {
-    if (!confirm('このブックマークを削除しますか？')) return
+    if (!onDelete || !confirm('このブックマークを削除しますか？')) return
     
     try {
-      await deleteBookmark(bookmark.id)
+      await onDelete(bookmark.id)
     } catch (error) {
       console.error('Failed to delete bookmark:', error)
     }
@@ -555,33 +517,28 @@ export function BookmarkCard({ bookmark, onUpdate }: BookmarkCardProps) {
 }
 ```
 
-### TagsTree コンポーネント
+### TagsList コンポーネント
 ```typescript
-// components/tags/tags-tree.tsx
+// components/tags/tags-list.tsx - シンプルなフラットリスト
 import { useState } from 'react'
 import { useTags } from '@/hooks/use-tags'
-import type { TagWithChildren } from '@/hooks/use-tags'
+import type { TagRow } from '@/types/database'
 
-export function TagsTree() {
-  const { tagsTree, updateTag, deleteTag, reorderTags } = useTags()
+export function TagsList() {
+  const { tags, updateTag, deleteTag, reorderTags } = useTags()
   const [draggedTag, setDraggedTag] = useState<string | null>(null)
 
   const handleDragStart = (tagId: string) => {
     setDraggedTag(tagId)
   }
 
-  const handleDrop = async (targetTagId: string, position: 'before' | 'after' | 'inside') => {
+  const handleDrop = async (targetTagId: string) => {
     if (!draggedTag || draggedTag === targetTagId) return
 
     try {
-      if (position === 'inside') {
-        // 親子関係の変更
-        await updateTag(draggedTag, { parent_tag_id: targetTagId })
-      } else {
-        // 並び順の変更
-        // 実装は複雑になるため、ここでは省略
-        console.log('Reorder:', { draggedTag, targetTagId, position })
-      }
+      // 並び順の変更のみサポート（簡略化実装）
+      console.log('Reorder:', { draggedTag, targetTagId })
+      // 実際の実装では、ドラッグ先の位置に応じてdisplay_orderを更新
     } catch (error) {
       console.error('Failed to move tag:', error)
     } finally {
@@ -589,16 +546,15 @@ export function TagsTree() {
     }
   }
 
-  const renderTag = (tag: TagWithChildren) => (
+  const renderTag = (tag: TagRow) => (
     <div
       key={tag.id}
       className="tag-item"
-      style={{ marginLeft: `${tag.level * 20}px` }}
       draggable
       onDragStart={() => handleDragStart(tag.id)}
       onDrop={(e) => {
         e.preventDefault()
-        handleDrop(tag.id, 'inside')
+        handleDrop(tag.id)
       }}
       onDragOver={(e) => e.preventDefault()}
     >
@@ -610,20 +566,14 @@ export function TagsTree() {
         <span className="font-medium">{tag.name}</span>
         <span className="text-xs text-gray-500">#{tag.id.slice(-6)}</span>
       </div>
-      
-      {tag.children && tag.children.length > 0 && (
-        <div className="tag-children">
-          {tag.children.map(renderTag)}
-        </div>
-      )}
     </div>
   )
 
   return (
-    <div className="tags-tree">
-      <h3 className="text-lg font-semibold mb-4">タグ階層</h3>
+    <div className="tags-list">
+      <h3 className="text-lg font-semibold mb-4">タグ一覧</h3>
       <div className="space-y-1">
-        {tagsTree.map(renderTag)}
+        {tags.map(renderTag)}
       </div>
     </div>
   )
@@ -665,3 +615,73 @@ export function TagsTree() {
 - PostMessage API による通信
 - JWT トークンベースの認証
 - Chrome Storage API でのローカル設定保存
+
+### Chrome拡張機能での新規ブックマーク作成時の即時反映
+```typescript
+// chrome-extension/content-script.js
+const createBookmarkFromExtension = async (bookmarkData) => {
+  try {
+    // WebアプリのAPIを呼び出してブックマーク作成
+    const response = await fetch('https://your-app.com/api/bookmarks', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${jwtToken}`
+      },
+      body: JSON.stringify(bookmarkData)
+    })
+    
+    if (response.ok) {
+      // Webアプリが開いている場合、PostMessageで通知
+      window.postMessage({
+        type: 'BOOKMARK_CREATED_FROM_EXTENSION',
+        bookmark: await response.json()
+      }, '*')
+    }
+  } catch (error) {
+    console.error('Failed to create bookmark from extension:', error)
+  }
+}
+```
+
+```typescript
+// Webアプリ側でのPostMessage受信処理
+// pages/bookmarks/index.tsx
+useEffect(() => {
+  const handleExtensionMessage = (event: MessageEvent) => {
+    if (event.data.type === 'BOOKMARK_CREATED_FROM_EXTENSION') {
+      // 拡張機能からの新規ブックマーク作成を即座に反映
+      const { bookmark } = event.data
+      // useBookmarksのcreateBookmarkを呼び出してステート更新
+      // または直接setBookmarksでステート更新
+    }
+  }
+  
+  window.addEventListener('message', handleExtensionMessage)
+  return () => window.removeEventListener('message', handleExtensionMessage)
+}, [])
+```
+
+## 使用例
+
+### ブックマーク一覧ページ（Realtime有効）
+```typescript
+// pages/bookmarks/index.tsx
+export default function BookmarksListPage() {
+  const { bookmarks, loading } = useBookmarks({
+    enableRealtime: true // 一覧ページではリアルタイムを有効化
+  })
+  
+  // ...
+}
+```
+
+### ブックマーク編集ページ（Realtime無効）
+```typescript
+// pages/bookmarks/[id]/edit.tsx
+export default function BookmarkEditPage() {
+  const { updateBookmark } = useBookmarks() // enableRealtime: falseがデフォルト
+  
+  // 編集後は手動でステート更新される
+}
+```
