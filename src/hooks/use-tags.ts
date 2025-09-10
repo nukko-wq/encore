@@ -60,7 +60,6 @@ export function useTags() {
     }
   }, [fetchTags, user])
 
-
   const createTag = useCallback(
     async (data: {
       name: string
