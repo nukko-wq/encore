@@ -96,9 +96,6 @@ export default function TagsList({
               {tag.name}
             </span>
 
-            {/* タグID（デバッグ用） */}
-            <span className="text-xs text-gray-400">#{tag.id.slice(-6)}</span>
-
             {/* アクションボタン */}
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
@@ -107,10 +104,18 @@ export default function TagsList({
                   e.stopPropagation()
                   onTagEdit?.(tag)
                 }}
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-blue-600 rounded"
+                className="w-7 h-7 flex items-center justify-center text-gray-400 hover:text-blue-600 rounded hover:cursor-pointer"
                 aria-label={`タグ「${tag.name}」を編集`}
               >
-                ✏️
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="22px"
+                  viewBox="0 -960 960 960"
+                  width="22px"
+                  fill="currentColor"
+                >
+                  <path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z" />
+                </svg>
               </button>
               <button
                 type="button"
@@ -118,10 +123,18 @@ export default function TagsList({
                   e.stopPropagation()
                   handleDeleteTag(tag.id, tag.name)
                 }}
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
+                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-red-600 rounded hover:cursor-pointer"
                 aria-label={`タグ「${tag.name}」を削除`}
               >
-                🗑️
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="22px"
+                  viewBox="0 -960 960 960"
+                  width="22px"
+                  fill="currentColor"
+                >
+                  <path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z" />
+                </svg>
               </button>
             </div>
           </div>
