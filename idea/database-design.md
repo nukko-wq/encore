@@ -40,8 +40,11 @@
 
 ### テーブル設計
 
-#### 0. allowed_emails（ホワイトリスト）
+#### 0. allowed_emails（ホワイトリスト - 現在未使用）
 ```sql
+-- 注意：初期設計で想定されていたが、現在の実装では使用されていない
+-- 将来的にユーザー制限が必要になった場合のため設計のみ記載
+
 -- ホワイトリストテーブル（シンプル設計）
 -- citextで大文字小文字を自動無視
 create extension if not exists citext;
@@ -107,36 +110,21 @@ create table if not exists public.bookmarks (
 -- RLS有効化
 alter table public.bookmarks enable row level security;
 
--- ホワイトリスト＆本人のみ読み取り可能
-create policy "read_own_if_allowed" on public.bookmarks
-for select using (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+-- 現在の実装：シンプルなuser_id制御（ホワイトリスト無し）
+create policy "bookmarks_select_own" on public.bookmarks
+for select using (user_id = auth.uid());
 
--- ホワイトリスト＆本人のみ書き込み可能
-create policy "write_own_if_allowed" on public.bookmarks
-for insert with check (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+create policy "bookmarks_insert_own" on public.bookmarks
+for insert with check (user_id = auth.uid());
 
--- 更新・削除ポリシー
-create policy "update_own_if_allowed" on public.bookmarks
-for update using (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+create policy "bookmarks_update_own" on public.bookmarks
+for update using (user_id = auth.uid());
 
-create policy "delete_own_if_allowed" on public.bookmarks
-for delete using (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+create policy "bookmarks_delete_own" on public.bookmarks
+for delete using (user_id = auth.uid());
+
+-- 注意：初期設計ではallowed_emailsによるホワイトリスト制御を想定していたが、
+-- 現在の実装では簡素化のためuser_idのみでアクセス制御を行っている
 ```
 
 #### 3. tags（タグ）
@@ -192,10 +180,10 @@ for all using (
 ```
 
 **セキュリティモデル（タグ系テーブル）**:
-- **Primary保護**: bookmarksテーブルのRLS（ホワイトリスト + user_id）
+- **Primary保護**: bookmarksテーブルのRLS（user_id制御）
 - **Secondary保護**: tags/bookmark_tagsテーブルのuser_id分離
-- **最適化**: tagsはユーザー内部データのため、冗長なホワイトリストチェック削除
-- **保証**: bookmarksテーブル経由でのアクセスのみのため、セキュリティレベル維持
+- **一貫性**: 全テーブルでuser_id = auth.uid()による統一されたアクセス制御
+- **保証**: 各テーブルが独立してユーザー分離を実現、セキュリティレベル維持
 
 #### 5. link_previews（リンクプレビューキャッシュ）
 ```sql
