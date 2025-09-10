@@ -30,9 +30,7 @@ export default function BookmarkCard({
   const menuButtonRef = useRef<HTMLButtonElement>(null)
 
   // ブックマークのタグを取得
-  const { tags: bookmarkTags, loading: tagsLoading } = useBookmarkTags(
-    bookmark.id,
-  )
+  const { tags: bookmarkTags } = useBookmarkTags(bookmark.id)
 
   // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
   const isLoadingBookmark =
@@ -230,36 +228,25 @@ export default function BookmarkCard({
           )}
 
           {/* タグ表示 */}
-          {isLoadingBookmark || tagsLoading ? (
+          {bookmarkTags && bookmarkTags.length > 0 && (
             <div className="mb-3">
               <div className="flex flex-wrap gap-1">
-                <div className="h-6 w-16 bg-gray-200 rounded-full animate-pulse"></div>
-                <div className="h-6 w-20 bg-gray-200 rounded-full animate-pulse"></div>
-                <div className="h-6 w-12 bg-gray-200 rounded-full animate-pulse"></div>
+                {bookmarkTags.slice(0, 4).map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-white"
+                    style={{ backgroundColor: tag.color }}
+                  >
+                    {tag.name}
+                  </span>
+                ))}
+                {bookmarkTags.length > 4 && (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
+                    +{bookmarkTags.length - 4}個
+                  </span>
+                )}
               </div>
             </div>
-          ) : (
-            bookmarkTags &&
-            bookmarkTags.length > 0 && (
-              <div className="mb-3">
-                <div className="flex flex-wrap gap-1">
-                  {bookmarkTags.slice(0, 4).map((tag) => (
-                    <span
-                      key={tag.id}
-                      className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-white"
-                      style={{ backgroundColor: tag.color }}
-                    >
-                      {tag.name}
-                    </span>
-                  ))}
-                  {bookmarkTags.length > 4 && (
-                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
-                      +{bookmarkTags.length - 4}個
-                    </span>
-                  )}
-                </div>
-              </div>
-            )
           )}
 
           {/* フッター情報 */}
