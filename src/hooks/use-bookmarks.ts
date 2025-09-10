@@ -68,8 +68,13 @@ export function useBookmarks(filters?: BookmarkFilters) {
   useEffect(() => {
     if (!user) return
 
-    const setupRealtime = () => {
-      console.log('🔧 Setting up Realtime for user:', user.id)
+    let reconnectTimeoutId: NodeJS.Timeout | null = null
+    let reconnectAttempts = 0
+    const maxReconnectAttempts = 5
+    let isUnmounted = false
+
+    const setupRealtime = (): (() => void) => {
+      console.log(`🔧 Setting up Realtime for user: ${user.id} (attempt ${reconnectAttempts + 1})`)
       const channelName = `bookmarks-changes-${user.id}`
       console.log('📻 Creating channel:', channelName)
 
@@ -411,24 +416,71 @@ export function useBookmarks(filters?: BookmarkFilters) {
           },
         )
         .subscribe((status, err) => {
-          console.log('📡 Bookmark realtime subscription status:', status)
+          console.log(`📡 Bookmark realtime subscription status: ${status} (attempt ${reconnectAttempts + 1})`)
 
           if (status === 'SUBSCRIBED') {
             console.log(
               '✅ Bookmark realtime connected successfully for channel:',
               channelName,
             )
+            // 接続成功時は再接続カウンターをリセット
+            reconnectAttempts = 0
+            setError(null) // 接続成功時はエラーをクリア
           } else if (status === 'CHANNEL_ERROR') {
-            console.error('❌ Bookmark realtime channel error:', err)
-            setError('リアルタイム接続でエラーが発生しました')
+            const errorMessage = err ? (typeof err === 'string' ? err : JSON.stringify(err)) : 'Unknown error'
+            console.error('❌ Bookmark realtime channel error:', errorMessage)
+            console.error('📛 Error details:', {
+              error: err,
+              errorType: typeof err,
+              channelName,
+              reconnectAttempts,
+              maxAttempts: maxReconnectAttempts
+            })
+            
+            // 再接続を試行
+            if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
+              const retryDelay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000) // 指数バックオフ（最大30秒）
+              console.log(`🔄 Scheduling reconnection in ${retryDelay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`)
+              
+              reconnectTimeoutId = setTimeout(() => {
+                if (!isUnmounted) {
+                  reconnectAttempts++
+                  console.log('🔄 Attempting to reconnect...') 
+                  channel.unsubscribe()
+                  setupRealtime()
+                }
+              }, retryDelay)
+            } else {
+              setError('リアルタイム接続でエラーが発生しました。ページを再読み込みしてください。')
+            }
           } else if (status === 'TIMED_OUT') {
             console.error('⏰ Bookmark realtime connection timed out')
-            setError('リアルタイム接続がタイムアウトしました')
+            
+            // タイムアウト時も再接続を試行
+            if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
+              reconnectAttempts++
+              console.log(`🔄 Reconnecting after timeout (attempt ${reconnectAttempts}/${maxReconnectAttempts})`)
+              setupRealtime()
+            } else {
+              setError('リアルタイム接続がタイムアウトしました。ページを再読み込みしてください。')
+            }
           } else if (status === 'CLOSED') {
             console.warn(
               '🔐 Bookmark realtime connection closed for channel:',
               channelName,
             )
+            
+            // 予期しない切断時の再接続
+            if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
+              reconnectAttempts++
+              console.log(`🔄 Reconnecting after unexpected closure (attempt ${reconnectAttempts}/${maxReconnectAttempts})`)
+              const retryDelay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000)
+              reconnectTimeoutId = setTimeout(() => {
+                if (!isUnmounted) {
+                  setupRealtime()
+                }
+              }, retryDelay)
+            }
           } else if (status === 'CONNECTING') {
             console.log(
               '🔄 Connecting to bookmark realtime for channel:',
@@ -444,7 +496,13 @@ export function useBookmarks(filters?: BookmarkFilters) {
           }
 
           if (err) {
-            console.error('📛 Bookmark realtime error details:', err)
+            console.error('📛 Bookmark realtime error details:', {
+              error: err,
+              errorType: typeof err,
+              errorMessage: err ? (typeof err === 'string' ? err : err.toString()) : 'undefined',
+              status,
+              channelName
+            })
           }
         })
 
@@ -457,8 +515,23 @@ export function useBookmarks(filters?: BookmarkFilters) {
       }
     }
 
-    const cleanup = setupRealtime()
-    return cleanup
+    // 初回接続
+    const initialCleanup = setupRealtime()
+    
+    // useEffect全体のクリーンアップ関数
+    return () => {
+      console.log('🧹 Cleaning up bookmark realtime connection')
+      isUnmounted = true
+      
+      // 保留中の再接続タイマーをクリア
+      if (reconnectTimeoutId) {
+        clearTimeout(reconnectTimeoutId)
+        reconnectTimeoutId = null
+      }
+      
+      // チャンネルのクリーンアップ
+      initialCleanup()
+    }
   }, [user]) // userが変わったときに再設定
 
   const createBookmark = useCallback(
