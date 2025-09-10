@@ -169,13 +169,13 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
   const createBookmark = useCallback(
     async (data: { url: string; title?: string; description?: string }) => {
-      // 1. 一時IDでtemp entryを即座に作成（真の楽観的更新）
-      const tempId = `temp-${crypto.randomUUID()}`
+      // 1. 有効なUUIDで一時entryを即座に作成（真の楽観的更新）
+      const tempId = crypto.randomUUID() // temp-プレフィックスを削除
       const tempBookmark: Bookmark & { isLoading?: boolean } = {
         id: tempId,
         url: data.url,
         canonical_url: data.url, // 一時的：APIレスポンスで正式な値に置換
-        title: data.title || null, // スケルトンUI用にnullに変更
+        title: data.title || null, // スケルトンUI用のnullに変更
         description: data.description || null,
         memo: null,
         thumbnail_url: null,
