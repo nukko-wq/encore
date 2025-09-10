@@ -72,12 +72,15 @@ export default async function DashboardPage() {
                     </div>
                   </Link>
 
-                  <div className="bg-white overflow-hidden shadow rounded-lg opacity-50">
+                  <Link
+                    href="/tags"
+                    className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow duration-200"
+                  >
                     <div className="p-6">
                       <div className="flex items-center">
                         <div className="flex-shrink-0">
                           <svg
-                            className="h-8 w-8 text-gray-400"
+                            className="h-8 w-8 text-green-600"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -96,13 +99,13 @@ export default async function DashboardPage() {
                               タグ
                             </dt>
                             <dd className="text-lg font-medium text-gray-900">
-                              管理 (近日公開)
+                              管理
                             </dd>
                           </dl>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </Link>
 
                   <div className="bg-white overflow-hidden shadow rounded-lg opacity-50">
                     <div className="p-6">

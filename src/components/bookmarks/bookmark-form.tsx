@@ -60,11 +60,11 @@ export default function BookmarkForm({
   }
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black/25 flex items-center justify-center z-50"
       onClick={onClose}
     >
-      <div 
+      <div
         className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
         onClick={(e) => e.stopPropagation()}
       >

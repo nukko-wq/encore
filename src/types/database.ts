@@ -150,3 +150,27 @@ export interface CreateLinkPreviewData {
   source: PreviewSource
   retry_count?: number
 }
+
+// ブックマーク-タグ関連の型定義
+export interface BookmarkTag {
+  id: string
+  bookmark_id: string
+  tag_id: string
+  created_at: string
+}
+
+// ブックマーク-タグ作成用の型
+export interface CreateBookmarkTagData {
+  bookmark_id: string
+  tag_id: string
+}
+
+// タグ付きブックマーク（JOINクエリ用）
+export interface BookmarkWithTags extends Bookmark {
+  tags?: {
+    id: string
+    name: string
+    color: string
+    parent_tag_id: string | null
+  }[]
+}

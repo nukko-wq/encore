@@ -32,10 +32,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     getInitialSession()
 
-    // 認証状態変更の監視（ホワイトリストチェックはコールバックで実行）
+    // 認証状態変更の監視
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       // サインアウト時のクリーンアップ
       if (event === 'SIGNED_OUT') {
         setUser(null)

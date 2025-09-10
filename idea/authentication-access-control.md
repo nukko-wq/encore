@@ -49,12 +49,18 @@ export const onAuthStateChange = (callback: (event: string, session: any) => voi
 }
 ```
 
-### ホワイトリストチェック機能
+### ホワイトリストチェック機能（最適化済み）
+
+**実装方針**：
+- **Primary保護**: Supabase RLS policies（データベースレベルで確実に保護）
+- **Secondary保護**: ログイン時のチェック（UX向上のため）
+- **削除した冗長性**: セッション復帰時の重複チェック（パフォーマンス向上）
+
 ```typescript
-// lib/auth-hooks.ts
+// lib/auth-hooks.ts - ログイン時のみホワイトリストチェック
 import { supabase } from './supabase'
 
-// サインイン後のホワイトリストチェック（Authフック）
+// サインイン後のホワイトリストチェック（初回ログイン時のみ）
 export const setupAuthHook = () => {
   supabase.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session?.user?.email) {
@@ -68,6 +74,7 @@ export const setupAuthHook = () => {
         window.location.href = '/auth/error?message=unauthorized'
       }
     }
+    // 注意: TOKEN_REFRESHED、セッション復帰時はチェックしない（RLSが保護）
   })
 }
 

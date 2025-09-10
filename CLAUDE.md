@@ -27,6 +27,8 @@ This is a bookmark management system called "Encore" built with Next.js 15 and t
 - **TypeScript 5** with strict mode enabled
 - **Tailwind CSS v4** via PostCSS
 - **Biome** for linting and formatting (replaces ESLint + Prettier)
+- **Supabase** for backend services (authentication, database)
+- **React Aria Components** for accessible UI components
 
 ### Project Purpose
 Encore is designed as a comprehensive bookmark management system with advanced metadata extraction capabilities. See `idea/` directory for detailed technical architecture and specifications.
@@ -40,10 +42,13 @@ Encore is designed as a comprehensive bookmark management system with advanced m
 
 ### Architecture Documents
 Critical design documents are located in the `idea/` directory:
+- `technical-architecture.md` - Overall system architecture index
 - `database-design.md` - Database schema and design patterns
 - `api-design.md` - API endpoints and data access patterns
 - `metadata-extraction.md` - Core metadata extraction system
-- `technical-architecture.md` - Overall system architecture index
+- `authentication-access-control.md` - Authentication and authorization
+- `bookmark-tagging-ui-design.md` - UI design specifications
+- `frontend-state-management.md` - State management patterns
 
 ### Code Style (Biome Configuration)
 - **Indentation**: 2 spaces

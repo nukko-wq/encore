@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/components/common/auth-provider'
 import type { Bookmark, BookmarkFilters } from '@/types/database'
 
 export function useBookmarks(filters?: BookmarkFilters) {
+  const { user } = useAuth()
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -60,6 +63,63 @@ export function useBookmarks(filters?: BookmarkFilters) {
   useEffect(() => {
     fetchBookmarks()
   }, [fetchBookmarks])
+
+  // Supabase Realtimeでリアルタイム更新（ユーザースコープ絞り込み）
+  useEffect(() => {
+    if (!user) return
+
+    const setupRealtime = () => {
+      const channel = supabase
+        .channel(`bookmarks-changes-${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'bookmarks',
+            filter: `user_id=eq.${user.id}`, // ユーザースコープでフィルタ
+          },
+          (payload) => {
+            console.log('Realtime bookmark change:', payload)
+
+            if (payload.eventType === 'INSERT') {
+              const newBookmark = payload.new as Bookmark
+              setBookmarks((prev) => {
+                // 楽観的更新で既に存在する場合は重複を避ける
+                const exists = prev.some((b) => b.id === newBookmark.id)
+                if (exists) return prev
+                return [newBookmark, ...prev]
+              })
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedBookmark = payload.new as Bookmark
+              setBookmarks((prev) =>
+                prev.map((bookmark) =>
+                  bookmark.id === updatedBookmark.id
+                    ? updatedBookmark
+                    : bookmark,
+                ),
+              )
+            } else if (payload.eventType === 'DELETE') {
+              const deletedId = payload.old.id as string
+              setBookmarks((prev) =>
+                prev.filter((bookmark) => bookmark.id !== deletedId),
+              )
+            }
+          },
+        )
+        .subscribe((status) => {
+          console.log('Bookmark realtime subscription status:', status)
+        })
+
+      return () => {
+        console.log('Unsubscribing from bookmark realtime channel')
+        channel.unsubscribe()
+      }
+    }
+
+    const cleanup = setupRealtime()
+    return cleanup
+  }, [user]) // userが変わったときに再設定
 
   const createBookmark = useCallback(
     async (data: { url: string; title?: string; description?: string }) => {

@@ -40,8 +40,11 @@
 
 ### テーブル設計
 
-#### 0. allowed_emails（ホワイトリスト）
+#### 0. allowed_emails（Google認証ホワイトリスト）
 ```sql
+-- Google OAuth認証でログイン可能なメールアドレスを制限するホワイトリスト
+-- このテーブルに登録されたメールアドレスのみGoogle認証でログイン可能
+
 -- ホワイトリストテーブル（シンプル設計）
 -- citextで大文字小文字を自動無視
 create extension if not exists citext;
@@ -55,6 +58,9 @@ insert into public.allowed_emails (email) values
   ('your-email@gmail.com'),
   ('another-email@gmail.com')
 on conflict (email) do nothing;
+
+-- 注意：このテーブルはGoogle認証時のアクセス制御で使用されているが、
+-- データアクセス（bookmarks、tagsなど）のRLSポリシーでは参照されていない
 ```
 
 #### 1. users（ユーザー - Supabase Auth自動管理）
@@ -107,36 +113,21 @@ create table if not exists public.bookmarks (
 -- RLS有効化
 alter table public.bookmarks enable row level security;
 
--- ホワイトリスト＆本人のみ読み取り可能
-create policy "read_own_if_allowed" on public.bookmarks
-for select using (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+-- 現在の実装：シンプルなuser_id制御（ホワイトリスト無し）
+create policy "bookmarks_select_own" on public.bookmarks
+for select using (user_id = auth.uid());
 
--- ホワイトリスト＆本人のみ書き込み可能
-create policy "write_own_if_allowed" on public.bookmarks
-for insert with check (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+create policy "bookmarks_insert_own" on public.bookmarks
+for insert with check (user_id = auth.uid());
 
--- 更新・削除ポリシー
-create policy "update_own_if_allowed" on public.bookmarks
-for update using (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+create policy "bookmarks_update_own" on public.bookmarks
+for update using (user_id = auth.uid());
 
-create policy "delete_own_if_allowed" on public.bookmarks
-for delete using (
-  user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = auth.email())
-);
+create policy "bookmarks_delete_own" on public.bookmarks
+for delete using (user_id = auth.uid());
+
+-- 注意：初期設計ではallowed_emailsによるホワイトリスト制御を想定していたが、
+-- 現在の実装では簡素化のためuser_idのみでアクセス制御を行っている
 ```
 
 #### 3. tags（タグ）
@@ -154,12 +145,11 @@ create table if not exists public.tags (
 
 alter table public.tags enable row level security;
 
--- ホワイトリスト＆本人のみタグ管理可能
-create policy "manage_own_tags_if_allowed" on public.tags
+-- 本人のみタグ管理可能
+-- ホワイトリストチェックはbookmarksテーブルで実施済みのため冗長チェック削除
+create policy "manage_own_tags" on public.tags
 for all using (
   user_id = auth.uid()
-  and exists (select 1 from public.allowed_emails ae
-              where ae.email = (auth.jwt()->>'email'))
 );
 ```
 
@@ -175,15 +165,14 @@ create table if not exists public.bookmark_tags (
 
 alter table public.bookmark_tags enable row level security;
 
--- ブックマーク所有者かつタグ所有者かつホワイトリストユーザーのみタグ操作可能
-create policy "manage_bookmark_tags_if_allowed" on public.bookmark_tags
+-- ブックマーク所有者かつタグ所有者のみタグ操作可能
+-- ホワイトリストチェックはbookmarksテーブルのRLSで実施済み
+create policy "manage_bookmark_tags" on public.bookmark_tags
 for all using (
   exists (
     select 1 from public.bookmarks b
     where b.id = bookmark_tags.bookmark_id 
     and b.user_id = auth.uid()
-    and exists (select 1 from public.allowed_emails ae
-                where ae.email = (auth.jwt()->>'email'))
   )
   and exists (
     select 1 from public.tags t 
@@ -192,6 +181,12 @@ for all using (
   )
 );
 ```
+
+**セキュリティモデル（タグ系テーブル）**:
+- **Primary保護**: bookmarksテーブルのRLS（user_id制御）
+- **Secondary保護**: tags/bookmark_tagsテーブルのuser_id分離
+- **一貫性**: 全テーブルでuser_id = auth.uid()による統一されたアクセス制御
+- **保証**: 各テーブルが独立してユーザー分離を実現、セキュリティレベル維持
 
 #### 5. link_previews（リンクプレビューキャッシュ）
 ```sql

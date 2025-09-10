@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import {
   Button,
   Menu,
@@ -8,6 +8,8 @@ import {
   MenuTrigger,
   Popover,
 } from 'react-aria-components'
+import BookmarkTagManager from './bookmark-tag-manager'
+import { useBookmarkTags } from '@/hooks/use-bookmark-tags'
 import type { Bookmark } from '@/types/database'
 
 interface BookmarkCardProps {
@@ -24,6 +26,13 @@ export default function BookmarkCard({
   // もう削除スピナーは出さない
   // const [isDeleting, setIsDeleting] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isTagManagerOpen, setIsTagManagerOpen] = useState(false)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+
+  // ブックマークのタグを取得
+  const { tags: bookmarkTags, loading: tagsLoading } = useBookmarkTags(
+    bookmark.id,
+  )
 
   // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
   const isLoadingBookmark =
@@ -43,6 +52,14 @@ export default function BookmarkCard({
     }
   }
 
+  const handleTagManager = () => {
+    // メニューを先に閉じてから、少し遅延してタグマネージャーを開く
+    setIsMenuOpen(false)
+    setTimeout(() => {
+      setIsTagManagerOpen(true)
+    }, 100) // 100ms遅延でMenuTriggerのPopoverが完全に閉じてから開く
+  }
+
   return (
     <div className="bg-white overflow-hidden shadow rounded-lg hover:shadow-lg transition-all duration-200 flex flex-col h-80 sm:h-96 hover:scale-105 cursor-pointer group relative">
       {/* More Vert Menu */}
@@ -50,8 +67,17 @@ export default function BookmarkCard({
         className="absolute bottom-2 right-2 z-10"
         onClick={(e) => e.stopPropagation()}
       >
-        <MenuTrigger isOpen={isMenuOpen} onOpenChange={setIsMenuOpen}>
+        <MenuTrigger
+          isOpen={isMenuOpen && !isTagManagerOpen}
+          onOpenChange={(open) => {
+            // タグマネージャーが開いている時はメニューを開かない
+            if (!isTagManagerOpen) {
+              setIsMenuOpen(open)
+            }
+          }}
+        >
           <Button
+            ref={menuButtonRef}
             aria-label="ブックマークアクション"
             className={`w-8 h-8 rounded-full hover:bg-black/10 transition-colors duration-200 flex items-center justify-center outline-none cursor-pointer ${
               isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -74,6 +100,22 @@ export default function BookmarkCard({
           </Button>
           <Popover className="min-w-32 bg-white rounded-md shadow-lg ring-1 ring-black/5 entering:animate-in entering:fade-in-0 entering:zoom-in-95 exiting:animate-out exiting:fade-out-0 exiting:zoom-out-95 fill-mode-forwards">
             <Menu className="outline-none">
+              <MenuItem
+                onAction={handleTagManager}
+                className="w-full px-3 py-3 text-sm text-left rounded text-gray-700 outline-none cursor-pointer flex items-center gap-2 hover:bg-gray-100"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  height="18px"
+                  viewBox="0 -960 960 960"
+                  width="18px"
+                  fill="currentColor"
+                >
+                  <title>タグ</title>
+                  <path d="m240-160 40-160H120l20-80h160l40-160H180l20-80h160l40-160h80l-40 160h160l40-160h80l-40 160h160l-20 80H660l-40 160h160l-20 80H600l-40 160h-80l40-160H360l-40 160h-80Zm140-240h160l40-160H420l-40 160Z" />
+                </svg>
+                タグ
+              </MenuItem>
               <MenuItem
                 onAction={handleEdit}
                 className="w-full px-3 py-3 text-sm text-left rounded text-gray-700 outline-none cursor-pointer flex items-center gap-2 hover:bg-gray-100"
@@ -187,14 +229,37 @@ export default function BookmarkCard({
             )
           )}
 
-          {/* メモ */}
-          {bookmark.memo && (
-            <div className="mb-3 p-2 bg-yellow-50 rounded-md">
-              <p className="text-xs text-yellow-800 line-clamp-2">
-                <span className="font-medium">メモ: </span>
-                {bookmark.memo}
-              </p>
+          {/* タグ表示 */}
+          {isLoadingBookmark || tagsLoading ? (
+            <div className="mb-3">
+              <div className="flex flex-wrap gap-1">
+                <div className="h-6 w-16 bg-gray-200 rounded-full animate-pulse"></div>
+                <div className="h-6 w-20 bg-gray-200 rounded-full animate-pulse"></div>
+                <div className="h-6 w-12 bg-gray-200 rounded-full animate-pulse"></div>
+              </div>
             </div>
+          ) : (
+            bookmarkTags &&
+            bookmarkTags.length > 0 && (
+              <div className="mb-3">
+                <div className="flex flex-wrap gap-1">
+                  {bookmarkTags.slice(0, 4).map((tag) => (
+                    <span
+                      key={tag.id}
+                      className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-white"
+                      style={{ backgroundColor: tag.color }}
+                    >
+                      {tag.name}
+                    </span>
+                  ))}
+                  {bookmarkTags.length > 4 && (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
+                      +{bookmarkTags.length - 4}個
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
           )}
 
           {/* フッター情報 */}
@@ -225,6 +290,14 @@ export default function BookmarkCard({
           </div>
         </div>
       </button>
+
+      {/* タグ管理ポップオーバー */}
+      <BookmarkTagManager
+        bookmark={bookmark}
+        isOpen={isTagManagerOpen}
+        onOpenChange={setIsTagManagerOpen}
+        triggerRef={menuButtonRef}
+      />
     </div>
   )
 }
