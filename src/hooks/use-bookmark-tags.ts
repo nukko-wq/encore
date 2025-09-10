@@ -141,15 +141,50 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
             filter: `bookmark_id=eq.${bookmarkId}`,
           },
           (payload) => {
-            console.log('Realtime bookmark_tags change:', payload)
-            // 楽観的更新と競合しないよう、少し遅延して再取得
-            setTimeout(() => {
-              fetchBookmarkTags()
-            }, 500)
+            try {
+              console.log('Realtime bookmark_tags change received:', payload)
+              console.log(
+                'Processing bookmark_tags event:',
+                payload.eventType,
+                'for bookmark:',
+                bookmarkId,
+              )
+
+              // 楽観的更新と競合しないよう、少し遅延して再取得
+              setTimeout(() => {
+                fetchBookmarkTags()
+              }, 500)
+            } catch (error) {
+              console.error(
+                'Error processing realtime bookmark_tags change:',
+                error,
+                payload,
+              )
+            }
           },
         )
-        .subscribe((status) => {
-          console.log('Bookmark tags realtime subscription status:', status)
+        .subscribe((status, err) => {
+          console.log('📡 Bookmark tags realtime subscription status:', status)
+
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Bookmark tags realtime connected successfully')
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Bookmark tags realtime channel error:', err)
+            setError('ブックマークタグのリアルタイム接続でエラーが発生しました')
+          } else if (status === 'TIMED_OUT') {
+            console.error('⏰ Bookmark tags realtime connection timed out')
+            setError('ブックマークタグのリアルタイム接続がタイムアウトしました')
+          } else if (status === 'CLOSED') {
+            console.warn('🔐 Bookmark tags realtime connection closed')
+          } else if (status === 'CONNECTING') {
+            console.log('🔄 Connecting to bookmark tags realtime...')
+          } else {
+            console.log('📊 Bookmark tags realtime status:', status)
+          }
+
+          if (err) {
+            console.error('📛 Bookmark tags realtime error details:', err)
+          }
         })
 
       return () => {

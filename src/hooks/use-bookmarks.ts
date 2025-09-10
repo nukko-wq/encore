@@ -80,35 +80,78 @@ export function useBookmarks(filters?: BookmarkFilters) {
             filter: `user_id=eq.${user.id}`, // ユーザースコープでフィルタ
           },
           (payload) => {
-            console.log('Realtime bookmark change:', payload)
+            try {
+              console.log('Realtime bookmark change received:', payload)
 
-            if (payload.eventType === 'INSERT') {
-              const newBookmark = payload.new as Bookmark
-              setBookmarks((prev) => {
-                // 楽観的更新で既に存在する場合は重複を避ける
-                const exists = prev.some((b) => b.id === newBookmark.id)
-                if (exists) return prev
-                return [newBookmark, ...prev]
-              })
-            } else if (payload.eventType === 'UPDATE') {
-              const updatedBookmark = payload.new as Bookmark
-              setBookmarks((prev) =>
-                prev.map((bookmark) =>
-                  bookmark.id === updatedBookmark.id
-                    ? updatedBookmark
-                    : bookmark,
-                ),
-              )
-            } else if (payload.eventType === 'DELETE') {
-              const deletedId = payload.old.id as string
-              setBookmarks((prev) =>
-                prev.filter((bookmark) => bookmark.id !== deletedId),
+              if (payload.eventType === 'INSERT') {
+                const newBookmark = payload.new as Bookmark
+                console.log(
+                  'Processing INSERT event for bookmark:',
+                  newBookmark.id,
+                )
+                setBookmarks((prev) => {
+                  // 楽観的更新で既に存在する場合は重複を避ける
+                  const exists = prev.some((b) => b.id === newBookmark.id)
+                  if (exists) {
+                    console.log('Bookmark already exists, skipping INSERT')
+                    return prev
+                  }
+                  console.log('Adding new bookmark to state')
+                  return [newBookmark, ...prev]
+                })
+              } else if (payload.eventType === 'UPDATE') {
+                const updatedBookmark = payload.new as Bookmark
+                console.log(
+                  'Processing UPDATE event for bookmark:',
+                  updatedBookmark.id,
+                )
+                setBookmarks((prev) =>
+                  prev.map((bookmark) =>
+                    bookmark.id === updatedBookmark.id
+                      ? updatedBookmark
+                      : bookmark,
+                  ),
+                )
+              } else if (payload.eventType === 'DELETE') {
+                const deletedId = payload.old.id as string
+                console.log('Processing DELETE event for bookmark:', deletedId)
+                setBookmarks((prev) =>
+                  prev.filter((bookmark) => bookmark.id !== deletedId),
+                )
+              } else {
+                console.warn('Unknown realtime event type:', (payload as any).eventType)
+              }
+            } catch (error) {
+              console.error(
+                'Error processing realtime bookmark change:',
+                error,
+                payload,
               )
             }
           },
         )
-        .subscribe((status) => {
-          console.log('Bookmark realtime subscription status:', status)
+        .subscribe((status, err) => {
+          console.log('📡 Bookmark realtime subscription status:', status)
+
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Bookmark realtime connected successfully')
+          } else if (status === 'CHANNEL_ERROR') {
+            console.error('❌ Bookmark realtime channel error:', err)
+            setError('リアルタイム接続でエラーが発生しました')
+          } else if (status === 'TIMED_OUT') {
+            console.error('⏰ Bookmark realtime connection timed out')
+            setError('リアルタイム接続がタイムアウトしました')
+          } else if (status === 'CLOSED') {
+            console.warn('🔐 Bookmark realtime connection closed')
+          } else if (status === 'CONNECTING') {
+            console.log('🔄 Connecting to bookmark realtime...')
+          } else {
+            console.log('📊 Bookmark realtime status:', status)
+          }
+
+          if (err) {
+            console.error('📛 Bookmark realtime error details:', err)
+          }
         })
 
       return () => {
