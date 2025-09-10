@@ -90,13 +90,41 @@ export function useBookmarks(filters?: BookmarkFilters) {
                   newBookmark.id,
                 )
                 setBookmarks((prev) => {
-                  // 楽観的更新で既に存在する場合は重複を避ける
-                  const exists = prev.some((b) => b.id === newBookmark.id)
-                  if (exists) {
-                    console.log('Bookmark already exists, skipping INSERT')
+                  // 改善された重複チェックロジック
+                  // 1. IDベースでの重複チェック（一時ブックマークは除外）
+                  const existsById = prev.some((b) => {
+                    const isTemporary = (b as any).isLoading === true
+                    return !isTemporary && b.id === newBookmark.id
+                  })
+                  
+                  if (existsById) {
+                    console.log('🔍 Bookmark ID already exists (non-temporary), skipping INSERT')
                     return prev
                   }
-                  console.log('Adding new bookmark to state')
+
+                  // 2. URLベースでの重複チェック（楽観的更新との競合を検出）
+                  const existingTempBookmark = prev.find((b) => {
+                    const isTemporary = (b as any).isLoading === true
+                    return isTemporary && 
+                           (b.canonical_url === newBookmark.canonical_url || 
+                            b.url === newBookmark.canonical_url ||
+                            b.canonical_url === newBookmark.url ||
+                            b.url === newBookmark.url)
+                  })
+
+                  if (existingTempBookmark) {
+                    console.log('🔄 Found temporary bookmark with matching URL, replacing with realtime data:', {
+                      tempId: existingTempBookmark.id,
+                      newId: newBookmark.id,
+                      url: newBookmark.canonical_url
+                    })
+                    // 一時ブックマークを正式なブックマークに置換
+                    return prev.map((bookmark) =>
+                      bookmark.id === existingTempBookmark.id ? newBookmark : bookmark,
+                    )
+                  }
+
+                  console.log('✨ Adding new bookmark to state from realtime')
                   return [newBookmark, ...prev]
                 })
               } else if (payload.eventType === 'UPDATE') {
@@ -190,6 +218,11 @@ export function useBookmarks(filters?: BookmarkFilters) {
       }
 
       // 2. 即座にUI更新（楽観的更新）
+      console.log('🚀 Creating optimistic bookmark:', {
+        tempId,
+        url: data.url,
+        title: data.title
+      })
       setBookmarks((prev) => [tempBookmark, ...prev])
       setError(null)
 
@@ -211,16 +244,31 @@ export function useBookmarks(filters?: BookmarkFilters) {
         const result = await response.json()
         const savedBookmark = result.data
 
+        console.log('✅ API bookmark creation successful:', {
+          tempId,
+          savedId: savedBookmark.id,
+          url: savedBookmark.canonical_url
+        })
+
         // 4. tempを正式なブックマークに置換
-        setBookmarks((prev) =>
-          prev.map((bookmark) =>
-            bookmark.id === tempId ? savedBookmark : bookmark,
-          ),
-        )
+        // 注意：Realtimeイベントが先に到着する可能性があるため、tempIdが存在するかチェック
+        setBookmarks((prev) => {
+          const tempStillExists = prev.some(b => b.id === tempId)
+          if (tempStillExists) {
+            console.log('🔄 Replacing temp bookmark with API result')
+            return prev.map((bookmark) =>
+              bookmark.id === tempId ? savedBookmark : bookmark,
+            )
+          } else {
+            console.log('⚡ Temp bookmark already replaced by realtime, keeping current state')
+            return prev
+          }
+        })
 
         return savedBookmark
       } catch (err) {
         // 5. エラー時はtempを削除（rollback）
+        console.error('❌ Bookmark creation failed, rolling back:', err)
         setBookmarks((prev) =>
           prev.filter((bookmark) => bookmark.id !== tempId),
         )
