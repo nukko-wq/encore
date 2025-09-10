@@ -685,3 +685,214 @@ export default function BookmarkEditPage() {
   // 編集後は手動でステート更新される
 }
 ```
+
+## Realtime購読のベストプラクティス
+
+### 重複・初期同期の落とし穴と対策
+
+#### 1. 重複購読の防止（コンポーネント再マウント対策）
+
+**問題**: Reactのコンポーネントが再マウントされると、同じチャンネルに対して複数回購読してしまう可能性がある
+
+**対策**: チャンネル名の一意性とクリーンアップを徹底する
+
+```typescript
+useEffect(() => {
+  if (!enableRealtime || !user) return
+  
+  // ユニークなチャンネル名を生成（ユーザーIDを含む）
+  const channelName = `bookmarks-${user.id}-${Math.random().toString(36).substr(2, 9)}`
+  
+  console.log('📡 Creating channel:', channelName)
+  
+  const channel = supabase
+    .channel(channelName)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'bookmarks',
+      filter: `user_id=eq.${user.id}`
+    }, handleRealtimeEvent)
+    .subscribe((status) => {
+      console.log('Subscription status:', status)
+    })
+  
+  // クリーンアップは必須
+  return () => {
+    console.log('🔌 Cleaning up channel:', channelName)
+    supabase.removeChannel(channel)
+  }
+}, [enableRealtime, user?.id])
+```
+
+#### 2. Singleton Supabaseクライアントの確保
+
+**重要**: 必ず単一のSupabaseクライアントインスタンスを使用する
+
+```typescript
+// lib/supabase.ts - Singletonパターン
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+
+// Singletonパターンでクライアントを作成
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true
+  }
+})
+
+// 複数のSupabaseクライアントを作成するのは絶対に避ける
+```
+
+#### 3. 正しい初期化順序：select → subscribe
+
+**必須パターン**: 初期データ取得完了後にRealtime購読を開始する
+
+```typescript
+export function useBookmarks({ enableRealtime = false } = {}) {
+  const [bookmarks, setBookmarks] = useState<BookmarkRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [isInitialized, setIsInitialized] = useState(false)
+  
+  // ステップ1: 初期データを取得
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        setLoading(true)
+        const { data, error } = await supabase
+          .from('bookmarks')
+          .select('*')
+          .order('created_at', { ascending: false })
+        
+        if (error) throw error
+        
+        setBookmarks(data || [])
+        setIsInitialized(true) // 初期化完了フラグ
+      } catch (err) {
+        console.error('Failed to fetch initial bookmarks:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    fetchInitialData()
+  }, [])
+  
+  // ステップ2: 初期化完了後にRealtime購読開始
+  useEffect(() => {
+    if (!enableRealtime || !isInitialized) return
+    
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    
+    console.log('🚀 Starting Realtime subscription after initial data load')
+    
+    const channel = supabase
+      .channel(`bookmarks-realtime-${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public', 
+        table: 'bookmarks',
+        filter: `user_id=eq.${user.id}`
+      }, (payload) => {
+        console.log('📨 Realtime event:', payload.eventType)
+        
+        // 初期データロード完了後のイベントのみ処理
+        switch (payload.eventType) {
+          case 'INSERT':
+            setBookmarks(prev => [payload.new as BookmarkRow, ...prev])
+            break
+          case 'UPDATE':  
+            setBookmarks(prev => prev.map(bookmark => 
+              bookmark.id === payload.new.id ? payload.new as BookmarkRow : bookmark
+            ))
+            break
+          case 'DELETE':
+            setBookmarks(prev => prev.filter(bookmark => bookmark.id !== payload.old.id))
+            break
+        }
+      })
+      .subscribe()
+    
+    return () => {
+      console.log('🔌 Unsubscribing from Realtime')
+      supabase.removeChannel(channel)
+    }
+  }, [enableRealtime, isInitialized])
+  
+  return { bookmarks, loading, isInitialized }
+}
+```
+
+#### 4. backfillは不要 - イベント駆動のみ
+
+**重要**: Realtime購読開始後はバックフィル（過去データの再取得）は不要。新しいイベントのみを処理する。
+
+```typescript
+// ❌ 悪い例：イベント受信時に毎回データを再取得
+const handleRealtimeEvent = async (payload) => {
+  // データを再取得するのは無駄で重い処理
+  const { data } = await supabase.from('bookmarks').select('*')
+  setBookmarks(data)
+}
+
+// ✅ 良い例：イベントの内容のみをステートに反映
+const handleRealtimeEvent = (payload) => {
+  if (payload.eventType === 'INSERT') {
+    setBookmarks(prev => [payload.new, ...prev])
+  } else if (payload.eventType === 'UPDATE') {
+    setBookmarks(prev => prev.map(item => 
+      item.id === payload.new.id ? payload.new : item
+    ))
+  } else if (payload.eventType === 'DELETE') {
+    setBookmarks(prev => prev.filter(item => item.id !== payload.old.id))
+  }
+}
+```
+
+#### 5. エラーハンドリングと復旧機能
+
+```typescript
+useEffect(() => {
+  if (!enableRealtime || !isInitialized) return
+  
+  let retryCount = 0
+  const maxRetries = 3
+  
+  const setupRealtime = () => {
+    const channel = supabase
+      .channel(`bookmarks-${user.id}-${Date.now()}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'bookmarks', 
+        filter: `user_id=eq.${user.id}`
+      }, handleRealtimeEvent)
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' && retryCount < maxRetries) {
+          console.warn(`Realtime connection failed, retrying... (${retryCount + 1}/${maxRetries})`)
+          retryCount++
+          setTimeout(() => setupRealtime(), 2000 * retryCount)
+        } else if (status === 'SUBSCRIBED') {
+          console.log('✅ Realtime subscription successful')
+          retryCount = 0
+        }
+      })
+    
+    return () => supabase.removeChannel(channel)
+  }
+  
+  return setupRealtime()
+}, [enableRealtime, isInitialized])
+```
+
+### まとめ
+
+- **初期化順序**: select → subscribe（初期データ完了後にRealtime購読）
+- **Singletonクライアント**: 必ず単一のSupabaseクライアントを使用
+- **重複防止**: ユニークなチャンネル名と確実なクリーンアップ
+- **イベント駆動**: backfillは不要、新しいイベントのみを処理
+- **エラー復旧**: 接続失敗時の自動再試行機能を実装
