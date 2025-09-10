@@ -8,7 +8,15 @@ import TagsList from '@/components/tags/tags-tree'
 import { type TagRow, useTags } from '@/hooks/use-tags'
 
 export default function TagsPage() {
-  const { tags, loading: isLoading, error } = useTags()
+  const {
+    tags,
+    loading: isLoading,
+    error,
+    createTag,
+    updateTag,
+    deleteTag,
+    reorderTags,
+  } = useTags()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingTag, setEditingTag] = useState<TagRow | null>(null)
@@ -25,7 +33,9 @@ export default function TagsPage() {
     setShowCreateModal(true)
   }
 
-  const handleTagCreated = () => {
+  const handleTagCreated = async () => {
+    // 楽観的更新が反映されるまで少し待機
+    await new Promise((resolve) => setTimeout(resolve, 100))
     setShowCreateModal(false)
   }
 
@@ -163,9 +173,14 @@ export default function TagsPage() {
                     </div>
                   ) : (
                     <TagsList
+                      tags={tags}
+                      loading={isLoading}
+                      error={error}
                       onTagSelect={handleTagSelect}
                       selectedTagId={selectedTagId}
                       onTagEdit={handleTagEdit}
+                      deleteTag={deleteTag}
+                      reorderTags={reorderTags}
                     />
                   )}
                 </div>
@@ -302,6 +317,8 @@ export default function TagsPage() {
               <TagForm
                 onSuccess={handleTagCreated}
                 onCancel={() => setShowCreateModal(false)}
+                createTag={createTag}
+                updateTag={updateTag}
               />
             </div>
           </div>
@@ -314,6 +331,7 @@ export default function TagsPage() {
           tag={editingTag}
           onSuccess={handleTagUpdated}
           onClose={handleEditModalClose}
+          updateTag={updateTag}
         />
       )}
     </div>

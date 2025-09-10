@@ -1,20 +1,31 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { type TagRow, useTags } from '@/hooks/use-tags'
+import { type TagRow } from '@/hooks/use-tags'
 
 interface TagsListProps {
+  tags: TagRow[]
+  loading: boolean
+  error: string | null
   onTagSelect?: (tagId: string) => void
   selectedTagId?: string
   onTagEdit?: (tag: TagRow) => void
+  deleteTag: (id: string) => Promise<void>
+  reorderTags: (
+    updates: { id: string; display_order: number }[],
+  ) => Promise<void>
 }
 
 export default function TagsList({
+  tags,
+  loading,
+  error,
   onTagSelect,
   selectedTagId,
   onTagEdit,
+  deleteTag,
+  reorderTags,
 }: TagsListProps) {
-  const { tags, loading, error, deleteTag, reorderTags } = useTags()
   const [draggedTag, setDraggedTag] = useState<string | null>(null)
 
   // ドラッグ開始
