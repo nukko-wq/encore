@@ -1,15 +1,27 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import BookmarkCard from '@/components/bookmarks/bookmark-card'
 import BookmarkDeleteDialog from '@/components/bookmarks/bookmark-delete-dialog'
 import BookmarkEditForm from '@/components/bookmarks/bookmark-edit-form'
 import BookmarkForm from '@/components/bookmarks/bookmark-form'
+import BookmarksSidebar from '@/components/bookmarks/sidebar'
 import Header, { type NavItem } from '@/components/layout/header'
 import { useBookmarks } from '@/hooks/use-bookmarks'
 import type { Bookmark } from '@/types/database'
 
 export default function BookmarksPage() {
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  const [showMobileTagFilter, setShowMobileTagFilter] = useState(false)
+
+  // フィルター条件をuseBookmarksに渡す
+  const filters = useMemo(
+    () => ({
+      tags: selectedTagIds.length > 0 ? selectedTagIds : undefined,
+    }),
+    [selectedTagIds],
+  )
+
   const {
     bookmarks,
     loading: isLoading,
@@ -17,7 +29,8 @@ export default function BookmarksPage() {
     createBookmark,
     deleteBookmark,
     updateBookmark,
-  } = useBookmarks()
+  } = useBookmarks(filters)
+
   const [showModal, setShowModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
@@ -30,6 +43,19 @@ export default function BookmarksPage() {
     { href: '/bookmarks', label: 'ブックマーク', isActive: true },
     { href: '/tags', label: 'タグ', isActive: false },
   ]
+
+  // タグごとのブックマーク数を計算
+  // TODO: API側でタグ情報を含むブックマークデータを取得する必要がある
+  const bookmarkCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    // 現在のブックマークタイプにはタグリレーション情報が含まれていないため、
+    // 一時的に空のオブジェクトを返す
+    return counts
+  }, [bookmarks])
+
+  const handleTagFilter = (tagIds: string[]) => {
+    setSelectedTagIds(tagIds)
+  }
 
   const handleBookmarkCreated = () => {
     // useBookmarksのRealtime機能で自動更新されるため、モーダルを閉じるだけ
@@ -66,8 +92,16 @@ export default function BookmarksPage() {
     <div className="min-h-screen bg-gray-50">
       <Header navItems={navItems} />
 
-      <main>
-        <div className="py-6 px-4 sm:px-6 lg:px-8 xl:px-12">
+      <main className="flex">
+        {/* サイドバー */}
+        <BookmarksSidebar
+          selectedTagIds={selectedTagIds}
+          onTagFilter={handleTagFilter}
+          bookmarkCounts={bookmarkCounts}
+        />
+
+        {/* メインコンテンツ */}
+        <div className="flex-1 py-6 px-4 sm:px-6 lg:px-8">
           <div className="py-6">
             <div className="mb-8 flex items-center justify-between">
               <div>
@@ -77,6 +111,35 @@ export default function BookmarksPage() {
                 <p className="mt-1 text-sm text-gray-600">
                   保存したページとリンクを管理します
                 </p>
+                {/* モバイル用タグフィルターボタン */}
+                <div className="mt-3 lg:hidden">
+                  <button
+                    onClick={() => setShowMobileTagFilter(!showMobileTagFilter)}
+                    className="inline-flex items-center px-3 py-1 border border-gray-300 rounded-md text-sm text-gray-700 bg-white hover:bg-gray-50"
+                    type="button"
+                  >
+                    <svg
+                      className="w-4 h-4 mr-1"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <title>タグ</title>
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                      />
+                    </svg>
+                    タグで絞り込み
+                    {selectedTagIds.length > 0 && (
+                      <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        {selectedTagIds.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
               </div>
               <button
                 type="button"
@@ -154,6 +217,58 @@ export default function BookmarksPage() {
                     onDelete={handleBookmarkDelete}
                   />
                 ))}
+              </div>
+            )}
+
+            {/* モバイル用タグフィルターモーダル */}
+            {showMobileTagFilter && (
+              <div className="fixed inset-0 z-50 lg:hidden">
+                <button
+                  className="fixed inset-0 bg-black bg-opacity-25"
+                  onClick={() => setShowMobileTagFilter(false)}
+                  type="button"
+                  aria-label="モーダルを閉じる"
+                />
+                <div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-lg shadow-lg max-h-96 overflow-y-auto">
+                  <div className="p-4 border-b border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-medium text-gray-900">
+                        タグで絞り込み
+                      </h3>
+                      <button
+                        onClick={() => setShowMobileTagFilter(false)}
+                        className="text-gray-400 hover:text-gray-600"
+                        type="button"
+                      >
+                        <svg
+                          className="w-6 h-6"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <title>閉じる</title>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <BookmarksSidebar
+                      selectedTagIds={selectedTagIds}
+                      onTagFilter={(tagIds) => {
+                        handleTagFilter(tagIds)
+                        setShowMobileTagFilter(false)
+                      }}
+                      bookmarkCounts={bookmarkCounts}
+                      compact={true}
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
