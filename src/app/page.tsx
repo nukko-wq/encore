@@ -19,7 +19,7 @@ export default async function Home() {
       )
 
       if (isAllowed && !whitelistError) {
-        redirect('/dashboard')
+        redirect('/bookmarks')
       }
       // ホワイトリストにない場合はエラーページへリダイレクト
       if (!isAllowed) {

@@ -1,28 +1,12 @@
 import Link from 'next/link'
-import SignOutButton from '@/components/common/sign-out-button'
-import { getCurrentUser } from '@/lib/supabase-server'
+import Header from '@/components/layout/header'
 
 export default async function DashboardPage() {
-  // middlewareで既に認証確認済みのため、getCurrentUserを使用
-  const user = await getCurrentUser()
+  // middlewareで既に認証確認済み
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="px-4 sm:px-6 lg:px-8 xl:px-12">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">Encore</h1>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-700">{user?.email}</span>
-              <SignOutButton />
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Header />
 
       <main>
         <div className="py-6 px-4 sm:px-6 lg:px-8 xl:px-12">

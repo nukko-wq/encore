@@ -32,40 +32,47 @@ export function useTags() {
   }
 
   // タグ取得関数（useCallbackで依存関係を管理）
-  const fetchTags = useCallback(async (force = false) => {
-    if (!user) return
+  const fetchTags = useCallback(
+    async (force = false) => {
+      if (!user) return
 
-    // 初回or強制更新時のみloading表示
-    if (!isInitialized || force) {
-      setLoading(true)
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('tags')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('display_order', { ascending: true }) // 表示順序
-
-      if (error) throw error
-
-      const tagData = data || []
-      setTags(tagData)
-      setError(null)
-      setIsInitialized(true)
-
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ Tags fetched successfully:', { count: tagData.length })
-      }
-    } catch (err) {
-      console.error('Error fetching tags:', err)
-      setError(err instanceof Error ? err.message : 'タグの取得に失敗しました')
-    } finally {
+      // 初回or強制更新時のみloading表示
       if (!isInitialized || force) {
-        setLoading(false)
+        setLoading(true)
       }
-    }
-  }, [user, isInitialized])
+
+      try {
+        const { data, error } = await supabase
+          .from('tags')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('display_order', { ascending: true }) // 表示順序
+
+        if (error) throw error
+
+        const tagData = data || []
+        setTags(tagData)
+        setError(null)
+        setIsInitialized(true)
+
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ Tags fetched successfully:', {
+            count: tagData.length,
+          })
+        }
+      } catch (err) {
+        console.error('Error fetching tags:', err)
+        setError(
+          err instanceof Error ? err.message : 'タグの取得に失敗しました',
+        )
+      } finally {
+        if (!isInitialized || force) {
+          setLoading(false)
+        }
+      }
+    },
+    [user, isInitialized],
+  )
 
   // 初回タグ取得（初期化されていない場合のみ）
   useEffect(() => {
@@ -74,7 +81,6 @@ export function useTags() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isInitialized]) // fetchTagsを意図的に依存関係から除外
-
 
   const createTag = useCallback(
     async (data: { name: string; color?: string; display_order?: number }) => {
@@ -100,7 +106,7 @@ export function useTags() {
         if (error) throw error
 
         // 手動でステート更新（即座反映）
-        setTags(prev => [...prev, newTag])
+        setTags((prev) => [...prev, newTag])
         setError(null)
 
         console.log('✅ Tag created successfully:', {
@@ -143,7 +149,7 @@ export function useTags() {
         if (error) throw error
 
         // 手動でステート更新（即座反映）
-        setTags(prev => prev.map(tag => tag.id === id ? updatedTag : tag))
+        setTags((prev) => prev.map((tag) => (tag.id === id ? updatedTag : tag)))
         setError(null)
 
         console.log('✅ Tag updated successfully:', {
@@ -181,7 +187,7 @@ export function useTags() {
         if (error) throw error
 
         // 手動でステート更新（即座反映）
-        setTags(prev => prev.filter(tag => tag.id !== id))
+        setTags((prev) => prev.filter((tag) => tag.id !== id))
         setError(null)
 
         console.log('✅ Tag deleted successfully:', { id })
@@ -214,11 +220,11 @@ export function useTags() {
         )
 
         await Promise.all(promises)
-        
+
         // 更新後に再取得してステート更新（強制更新）
         await fetchTags(true)
         setError(null)
-        
+
         console.log('✅ Tags reordered successfully')
       } catch (err) {
         const errorMessage =
