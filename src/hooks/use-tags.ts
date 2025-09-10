@@ -30,8 +30,16 @@ export function useTags() {
   const { user } = useAuth()
   const [tags, setTags] = useState<TagRow[]>([])
   const [tagsTree, setTagsTree] = useState<TagWithChildren[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // デバッグ: 最小限のログ
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🔍 useTags:', { hasUser: !!user, loading, tagsCount: tags.length })
+  }
 
   // stale closure対策：常に最新のtags状態をrefで保持
   const tagsRef = useRef(tags)
@@ -56,6 +64,10 @@ export function useTags() {
       setTags(tagData)
       setTagsTree(buildTagTree(tagData))
       setError(null)
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Tags fetched successfully:', { count: tagData.length })
+      }
     } catch (err) {
       console.error('Error fetching tags:', err)
       setError(err instanceof Error ? err.message : 'タグの取得に失敗しました')
@@ -70,6 +82,19 @@ export function useTags() {
       fetchTags()
     }
   }, [fetchTags, user])
+
+  // フォールバック: loadingが長時間trueの場合に強制解除
+  useEffect(() => {
+    if (!loading) return
+
+    const fallbackTimeout = setTimeout(() => {
+      console.warn('⚠️ Loading timeout reached, forcing loading to false')
+      setLoading(false)
+      setError('タグの読み込みがタイムアウトしました。ページをリロードしてください。')
+    }, 10000)
+
+    return () => clearTimeout(fallbackTimeout)
+  }, [loading])
 
   // Supabase Realtimeでリアルタイム更新（フィルターなし、クライアント側で処理）
   useEffect(() => {
@@ -97,11 +122,11 @@ export function useTags() {
               old: realtimePayload.old,
             })
 
-            const currentTags = tagsRef.current
-            console.log('📦 Current tags in state:', currentTags.length)
+            console.log('📦 Realtime event triggered')
 
             // ユーザーIDチェック（セキュリティ）
-            const tagUserId = realtimePayload.new?.user_id || realtimePayload.old?.user_id
+            const tagUserId =
+              realtimePayload.new?.user_id || realtimePayload.old?.user_id
             if (tagUserId !== user.id) {
               console.log('🚫 Ignoring event for different user:', tagUserId)
               return
@@ -112,29 +137,10 @@ export function useTags() {
                 case 'DELETE': {
                   if (!realtimePayload.old) return
                   const deletedTag = realtimePayload.old
-                  console.log(
-                    '🗑️ Processing DELETE event for tag:',
-                    deletedTag.id,
-                  )
+                  console.log('🗑️ Processing DELETE event for tag:', deletedTag.id)
 
-                  // 楽観的削除の確認
-                  const existingTag = currentTags.find(
-                    (t) => t.id === deletedTag.id,
-                  )
-                  if (!existingTag) {
-                    console.log(
-                      '🤝 Realtime DELETE confirms optimistic deletion:',
-                      deletedTag.id,
-                    )
-                  } else {
-                    console.log(
-                      '⚡ Realtime DELETE from external source (extension, etc):',
-                      deletedTag.id,
-                    )
-                  }
-
-                  console.log('✅ Removing tag from state via realtime')
                   setTags((current) => {
+                    console.log('✅ Removing tag from state via Realtime')
                     const updated = current.filter(
                       (t) => t.id !== deletedTag.id,
                     )
@@ -149,60 +155,32 @@ export function useTags() {
                   const newTag = realtimePayload.new
                   console.log('📝 Processing INSERT event for tag:', newTag.id)
 
-                  // 重複チェック（楽観的追加との重複回避）
-                  const existingTag = currentTags.find(
-                    (t) => t.id === newTag.id,
-                  )
-                  if (existingTag) {
-                    console.log(
-                      '🤝 Realtime INSERT confirms optimistic creation:',
-                      newTag.id,
+                  setTags((current) => {
+                    // 既存のタグをIDでチェック
+                    const existingTagById = current.find(
+                      (t) => t.id === newTag.id,
                     )
-                    // 既存のタグを新しいデータで更新（サーバーからの正式データで置換）
-                    setTags((current) => {
-                      const updated = current.map((t) =>
-                        t.id === newTag.id ? newTag : t,
-                      )
-                      setTagsTree(buildTagTree(updated))
-                      return updated
-                    })
-                  } else {
-                    console.log('✨ Adding new tag to state from realtime')
-                    setTags((current) => {
-                      const updated = [...current, newTag]
-                      setTagsTree(buildTagTree(updated))
-                      return updated
-                    })
-                  }
+
+                    if (existingTagById) {
+                      console.log('🤝 Tag already exists, skipping:', newTag.id)
+                      return current
+                    }
+
+                    console.log('✨ Adding new tag from Realtime:', newTag.id)
+                    const updated = [...current, newTag]
+                    setTagsTree(buildTagTree(updated))
+                    return updated
+                  })
                   break
                 }
 
                 case 'UPDATE': {
                   if (!realtimePayload.new) return
                   const updatedTag = realtimePayload.new
-                  console.log(
-                    '✏️ Processing UPDATE event for tag:',
-                    updatedTag.id,
-                  )
+                  console.log('✏️ Processing UPDATE event for tag:', updatedTag.id)
 
-                  // 楽観的更新の確認
-                  const existingTag = currentTags.find(
-                    (t) => t.id === updatedTag.id,
-                  )
-                  if (existingTag) {
-                    console.log(
-                      '🤝 Realtime UPDATE confirms optimistic update:',
-                      updatedTag.id,
-                    )
-                  } else {
-                    console.log(
-                      '⚡ Realtime UPDATE from external source (extension, etc):',
-                      updatedTag.id,
-                    )
-                  }
-
-                  console.log('✅ Applying tag update from realtime')
                   setTags((current) => {
+                    console.log('✅ Applying tag update from Realtime')
                     const updated = current.map((t) =>
                       t.id === updatedTag.id ? updatedTag : t,
                     )
@@ -272,25 +250,13 @@ export function useTags() {
     }) => {
       if (!user) throw new Error('認証が必要です')
 
-      // 1. 楽観的追加：テンポラリIDで即座にstateに追加
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
-      const tempTag: TagRow = {
-        id: tempId,
-        user_id: user.id,
+      console.log('🚀 Creating tag via API:', {
         name: data.name,
         color: data.color || '#6366f1',
-        parent_tag_id: data.parent_tag_id || null,
-        display_order: data.display_order || 0,
-        created_at: new Date().toISOString(),
-      }
-
-      console.log('🎯 Optimistically adding tag:', tempTag.id)
-      setTags((current) => {
-        const updated = [...current, tempTag]
-        setTagsTree(buildTagTree(updated))
-        return updated
+        parent_tag_id: data.parent_tag_id
       })
 
+      setIsCreating(true)
       try {
         const { data: newTag, error } = await supabase
           .from('tags')
@@ -304,41 +270,20 @@ export function useTags() {
 
         if (error) throw error
 
-        // 注意：Realtimeイベントが先に到着する可能性があるため、tempIdが存在するかチェック
-        setTags((current) => {
-          const tempExists = current.find((t) => t.id === tempId)
-          if (!tempExists) {
-            console.log(
-              '⚡ Temp tag already replaced by realtime, keeping current state',
-            )
-            return current
-          }
-
-          console.log(
-            '🔄 Replacing temp tag with server data:',
-            tempId,
-            '->',
-            newTag.id,
-          )
-          const updated = current.map((t) => (t.id === tempId ? newTag : t))
-          setTagsTree(buildTagTree(updated))
-          return updated
+        console.log('✅ Tag created successfully:', {
+          id: newTag.id,
+          name: newTag.name,
+          message: 'Waiting for Realtime event to update UI...'
         })
 
         return newTag
       } catch (err) {
-        // エラー時は楽観的追加を取り消し
-        console.log('❌ Rolling back optimistic tag addition:', tempId)
-        setTags((current) => {
-          const updated = current.filter((t) => t.id !== tempId)
-          setTagsTree(buildTagTree(updated))
-          return updated
-        })
-
         const errorMessage =
           err instanceof Error ? err.message : 'タグの作成に失敗しました'
         setError(errorMessage)
         throw new Error(errorMessage)
+      } finally {
+        setIsCreating(false)
       }
     },
     [user],
@@ -348,21 +293,12 @@ export function useTags() {
     async (id: string, updates: Partial<TagRow>) => {
       if (!user) throw new Error('認証が必要です')
 
-      // 1. 楽観的更新：即座にstateを更新
-      const originalTag = tagsRef.current.find((t) => t.id === id)
-      if (!originalTag) {
-        throw new Error('更新対象のタグが見つかりません')
-      }
-
-      const optimisticTag: TagRow = { ...originalTag, ...updates }
-
-      console.log('🎯 Optimistically updating tag:', id)
-      setTags((current) => {
-        const updated = current.map((t) => (t.id === id ? optimisticTag : t))
-        setTagsTree(buildTagTree(updated))
-        return updated
+      console.log('🚀 Updating tag via API:', {
+        id,
+        updates
       })
 
+      setIsUpdating(true)
       try {
         const { data: updatedTag, error } = await supabase
           .from('tags')
@@ -374,69 +310,20 @@ export function useTags() {
 
         if (error) throw error
 
-        // 注意：Realtimeイベントが先に到着する可能性があるため、チェック
-        setTags((current) => {
-          const currentTag = current.find((t) => t.id === id)
-          if (!currentTag) {
-            console.log(
-              '⚡ Optimistic update already replaced by realtime, keeping current state',
-            )
-            return current
-          }
-
-          console.log('🔄 Replacing optimistic update with server data:', id)
-          const updated = current.map((t) => (t.id === id ? updatedTag : t))
-          setTagsTree(buildTagTree(updated))
-          return updated
+        console.log('✅ Tag updated successfully:', {
+          id: updatedTag.id,
+          name: updatedTag.name,
+          message: 'Waiting for Realtime event to update UI...'
         })
-
-        console.log('⏳ Waiting for Realtime UPDATE event to confirm update...')
-
-        // 5秒後にRealtimeイベントが来なかった場合の保険
-        setTimeout(() => {
-          setTags((current) => {
-            const hasBeenUpdated = current.find(
-              (t) => t.id === id && t.name === updatedTag.name,
-            )
-            if (!hasBeenUpdated) {
-              console.log(
-                '⚠️ Realtime UPDATE event not received after 5 seconds, forcing local update',
-              )
-              const updated = current.map((t) => (t.id === id ? updatedTag : t))
-              setTagsTree(buildTagTree(updated))
-              return updated
-            }
-            return current
-          })
-        }, 5000)
 
         return updatedTag
       } catch (err) {
-        // エラー時は楽観的更新を取り消し
-        // Realtimeで既に更新されている可能性をチェック
-        const currentTag = tagsRef.current.find((t) => t.id === id)
-        if (
-          currentTag &&
-          JSON.stringify(currentTag) !== JSON.stringify(originalTag)
-        ) {
-          console.log('⚡ Tag already updated by realtime, not rolling back')
-          // Realtimeで既に更新済みの場合は、エラーを記録するが復旧しない
-          console.log(
-            '📊 Concurrent update detected - API failed but realtime succeeded',
-          )
-        } else {
-          console.log('❌ Rolling back optimistic tag update:', id)
-          setTags((current) => {
-            const updated = current.map((t) => (t.id === id ? originalTag : t))
-            setTagsTree(buildTagTree(updated))
-            return updated
-          })
-        }
-
         const errorMessage =
           err instanceof Error ? err.message : 'タグの更新に失敗しました'
         setError(errorMessage)
         throw new Error(errorMessage)
+      } finally {
+        setIsUpdating(false)
       }
     },
     [user],
@@ -446,20 +333,9 @@ export function useTags() {
     async (id: string) => {
       if (!user) throw new Error('認証が必要です')
 
-      // 1. 削除対象のタグを保存（復旧用）
-      const originalTag = tagsRef.current.find((t) => t.id === id)
-      if (!originalTag) {
-        throw new Error('削除対象のタグが見つかりません')
-      }
+      console.log('🚀 Deleting tag via API:', id)
 
-      // 2. 楽観的削除：即座にstateから削除
-      console.log('🎯 Optimistically deleting tag:', id)
-      setTags((current) => {
-        const updated = current.filter((t) => t.id !== id)
-        setTagsTree(buildTagTree(updated))
-        return updated
-      })
-
+      setIsDeleting(true)
       try {
         const { error } = await supabase
           .from('tags')
@@ -469,48 +345,17 @@ export function useTags() {
 
         if (error) throw error
 
-        console.log(
-          '⏳ Waiting for Realtime DELETE event to confirm deletion...',
-        )
-
-        // 5秒後にRealtimeイベントが来なかった場合の保険
-        setTimeout(() => {
-          setTags((current) => {
-            const stillExists = current.find((t) => t.id === id)
-            if (stillExists) {
-              console.log(
-                '⚠️ Realtime DELETE event not received after 5 seconds, forcing local deletion',
-              )
-              const updated = current.filter((t) => t.id !== id)
-              setTagsTree(buildTagTree(updated))
-              return updated
-            }
-            return current
-          })
-        }, 5000)
+        console.log('✅ Tag deleted successfully:', {
+          id,
+          message: 'Waiting for Realtime event to update UI...'
+        })
       } catch (err) {
-        // エラー時は楽観的削除を取り消し
-        // Realtimeで既に削除されている可能性をチェック
-        const currentTag = tagsRef.current.find((t) => t.id === id)
-        if (!currentTag) {
-          console.log('⚡ Tag already deleted by realtime, not rolling back')
-          // Realtimeで既に削除済みの場合は、エラーを記録するが復旧しない
-          console.log(
-            '📊 Concurrent deletion detected - API failed but realtime succeeded',
-          )
-        } else {
-          console.log('❌ Rolling back optimistic tag deletion:', id)
-          setTags((current) => {
-            const updated = [...current, originalTag]
-            setTagsTree(buildTagTree(updated))
-            return updated
-          })
-        }
-
         const errorMessage =
           err instanceof Error ? err.message : 'タグの削除に失敗しました'
         setError(errorMessage)
         throw new Error(errorMessage)
+      } finally {
+        setIsDeleting(false)
       }
     },
     [user],
@@ -547,6 +392,9 @@ export function useTags() {
     tags,
     tagsTree,
     loading,
+    isCreating,
+    isUpdating,
+    isDeleting,
     error,
     createTag,
     updateTag,
