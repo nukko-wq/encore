@@ -45,11 +45,17 @@ export default function BookmarksPage() {
   ]
 
   // タグごとのブックマーク数を計算
-  // TODO: API側でタグ情報を含むブックマークデータを取得する必要がある
   const bookmarkCounts = useMemo(() => {
     const counts: Record<string, number> = {}
-    // 現在のブックマークタイプにはタグリレーション情報が含まれていないため、
-    // 一時的に空のオブジェクトを返す
+    bookmarks?.forEach((bookmark) => {
+      // bookmark_tagsリレーションからタグIDを取得
+      if (bookmark.bookmark_tags) {
+        bookmark.bookmark_tags.forEach((tagRelation) => {
+          const tagId = tagRelation.tag_id
+          counts[tagId] = (counts[tagId] || 0) + 1
+        })
+      }
+    })
     return counts
   }, [bookmarks])
 

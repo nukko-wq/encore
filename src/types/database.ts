@@ -18,6 +18,14 @@ export interface Bookmark {
   pinned_at: string | null
   created_at: string
   updated_at: string
+  bookmark_tags?: Array<{
+    tag_id: string
+    tag: {
+      id: string
+      name: string
+      color: string
+    }
+  }>
 }
 
 export interface AllowedEmail {
