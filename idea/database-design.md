@@ -40,10 +40,10 @@
 
 ### テーブル設計
 
-#### 0. allowed_emails（ホワイトリスト - 現在未使用）
+#### 0. allowed_emails（Google認証ホワイトリスト）
 ```sql
--- 注意：初期設計で想定されていたが、現在の実装では使用されていない
--- 将来的にユーザー制限が必要になった場合のため設計のみ記載
+-- Google OAuth認証でログイン可能なメールアドレスを制限するホワイトリスト
+-- このテーブルに登録されたメールアドレスのみGoogle認証でログイン可能
 
 -- ホワイトリストテーブル（シンプル設計）
 -- citextで大文字小文字を自動無視
@@ -58,6 +58,9 @@ insert into public.allowed_emails (email) values
   ('your-email@gmail.com'),
   ('another-email@gmail.com')
 on conflict (email) do nothing;
+
+-- 注意：このテーブルはGoogle認証時のアクセス制御で使用されているが、
+-- データアクセス（bookmarks、tagsなど）のRLSポリシーでは参照されていない
 ```
 
 #### 1. users（ユーザー - Supabase Auth自動管理）
