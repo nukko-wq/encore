@@ -29,7 +29,7 @@ export class BookmarkService {
     const offset = (page - 1) * limit
 
     // タグフィルタがある場合は、特別な処理を行う
-    if (filters?.tags && filters.tags.length > 0) {
+    if (filters?.tags) {
       return this.getBookmarksWithTagFilter(filters, pagination)
     }
 
@@ -125,7 +125,7 @@ export class BookmarkService {
     const { data: bookmarkTags, error: tagError } = await supabase
       .from('bookmark_tags')
       .select('bookmark_id')
-      .in('tag_id', filters.tags!)
+      .eq('tag_id', filters.tags!)
 
     if (tagError) {
       throw new Error(`タグフィルタの処理に失敗しました: ${tagError.message}`)

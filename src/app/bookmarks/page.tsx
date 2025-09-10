@@ -11,19 +11,20 @@ import { useBookmarks } from '@/hooks/use-bookmarks'
 import type { Bookmark } from '@/types/database'
 
 export default function BookmarksPage() {
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null)
   const [showMobileTagFilter, setShowMobileTagFilter] = useState(false)
 
   // フィルター条件をuseBookmarksに渡す
   const filters = useMemo(
     () => ({
-      tags: selectedTagIds.length > 0 ? selectedTagIds : undefined,
+      tags: selectedTagId || undefined,
     }),
-    [selectedTagIds],
+    [selectedTagId],
   )
 
   const {
     bookmarks,
+    allBookmarks,
     loading: isLoading,
     error,
     createBookmark,
@@ -44,10 +45,10 @@ export default function BookmarksPage() {
     { href: '/tags', label: 'タグ', isActive: false },
   ]
 
-  // タグごとのブックマーク数を計算
+  // タグごとのブックマーク数を計算（全ブックマークを基準）
   const bookmarkCounts = useMemo(() => {
     const counts: Record<string, number> = {}
-    bookmarks?.forEach((bookmark) => {
+    allBookmarks?.forEach((bookmark) => {
       // bookmark_tagsリレーションからタグIDを取得
       if (bookmark.bookmark_tags) {
         bookmark.bookmark_tags.forEach((tagRelation) => {
@@ -57,10 +58,10 @@ export default function BookmarksPage() {
       }
     })
     return counts
-  }, [bookmarks])
+  }, [allBookmarks])
 
-  const handleTagFilter = (tagIds: string[]) => {
-    setSelectedTagIds(tagIds)
+  const handleTagFilter = (tagId: string | null) => {
+    setSelectedTagId(tagId)
   }
 
   const handleBookmarkCreated = () => {
@@ -101,7 +102,7 @@ export default function BookmarksPage() {
       <main className="flex">
         {/* サイドバー */}
         <BookmarksSidebar
-          selectedTagIds={selectedTagIds}
+          selectedTagId={selectedTagId}
           onTagFilter={handleTagFilter}
           bookmarkCounts={bookmarkCounts}
         />
@@ -139,9 +140,9 @@ export default function BookmarksPage() {
                       />
                     </svg>
                     タグで絞り込み
-                    {selectedTagIds.length > 0 && (
+                    {selectedTagId && (
                       <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {selectedTagIds.length}
+                        1
                       </span>
                     )}
                   </button>
@@ -265,9 +266,9 @@ export default function BookmarksPage() {
                   </div>
                   <div className="p-4">
                     <BookmarksSidebar
-                      selectedTagIds={selectedTagIds}
-                      onTagFilter={(tagIds) => {
-                        handleTagFilter(tagIds)
+                      selectedTagId={selectedTagId}
+                      onTagFilter={(tagId) => {
+                        handleTagFilter(tagId)
                         setShowMobileTagFilter(false)
                       }}
                       bookmarkCounts={bookmarkCounts}

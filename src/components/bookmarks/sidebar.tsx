@@ -4,14 +4,14 @@ import { useState } from 'react'
 import { useTags, type TagRow } from '@/hooks/use-tags'
 
 interface BookmarksSidebarProps {
-  selectedTagIds: string[]
-  onTagFilter: (tagIds: string[]) => void
+  selectedTagId: string | null
+  onTagFilter: (tagId: string | null) => void
   bookmarkCounts?: Record<string, number>
   compact?: boolean
 }
 
 export default function BookmarksSidebar({
-  selectedTagIds,
+  selectedTagId,
   onTagFilter,
   bookmarkCounts = {},
   compact = false,
@@ -20,17 +20,17 @@ export default function BookmarksSidebar({
   const [isCollapsed, setIsCollapsed] = useState(false)
 
   const handleTagClick = (tagId: string) => {
-    if (selectedTagIds.includes(tagId)) {
-      // 既に選択されている場合は除外
-      onTagFilter(selectedTagIds.filter((id) => id !== tagId))
+    if (selectedTagId === tagId) {
+      // 既に選択されている場合は解除
+      onTagFilter(null)
     } else {
       // 新しく選択
-      onTagFilter([...selectedTagIds, tagId])
+      onTagFilter(tagId)
     }
   }
 
   const handleClearFilter = () => {
-    onTagFilter([])
+    onTagFilter(null)
   }
 
   if (error) {
@@ -58,7 +58,7 @@ export default function BookmarksSidebar({
             <button
               onClick={handleClearFilter}
               className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                selectedTagIds.length === 0
+                selectedTagId === null
                   ? 'bg-blue-100 text-blue-700 font-medium'
                   : 'text-gray-700 hover:bg-gray-100'
               }`}
@@ -82,7 +82,7 @@ export default function BookmarksSidebar({
               </div>
             ) : (
               tags.map((tag: TagRow) => {
-                const isSelected = selectedTagIds.includes(tag.id)
+                const isSelected = selectedTagId === tag.id
                 const count = bookmarkCounts[tag.id] || 0
 
                 return (
@@ -164,7 +164,7 @@ export default function BookmarksSidebar({
             <button
               onClick={handleClearFilter}
               className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
-                selectedTagIds.length === 0
+                selectedTagId === null
                   ? 'bg-blue-100 text-blue-700 font-medium'
                   : 'text-gray-700 hover:bg-gray-100'
               }`}
@@ -189,7 +189,7 @@ export default function BookmarksSidebar({
                 </div>
               ) : (
                 tags.map((tag: TagRow) => {
-                  const isSelected = selectedTagIds.includes(tag.id)
+                  const isSelected = selectedTagId === tag.id
                   const count = bookmarkCounts[tag.id] || 0
 
                   return (
@@ -224,52 +224,6 @@ export default function BookmarksSidebar({
         )}
       </div>
 
-      {/* 選択中のタグ表示 */}
-      {selectedTagIds.length > 0 && (
-        <div className="border-t border-gray-200 p-3">
-          <div className="text-xs text-gray-500 mb-2">
-            選択中のタグ ({selectedTagIds.length})
-          </div>
-          <div className="space-y-1">
-            {selectedTagIds.map((tagId) => {
-              const tag = tags.find((t) => t.id === tagId)
-              if (!tag) return null
-
-              return (
-                <div
-                  key={tagId}
-                  className="flex items-center justify-between text-xs"
-                >
-                  <div className="flex items-center space-x-1">
-                    <div
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: tag.color }}
-                    />
-                    <span className="text-gray-700">{tag.name}</span>
-                  </div>
-                  <button
-                    onClick={() => handleTagClick(tagId)}
-                    className="text-gray-400 hover:text-gray-600"
-                    type="button"
-                  >
-                    <svg
-                      className="w-3 h-3"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

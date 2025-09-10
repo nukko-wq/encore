@@ -41,9 +41,9 @@ export async function GET(request: NextRequest) {
     }
 
     // タグフィルタ
-    const tags = searchParams.getAll('tags')
-    if (tags.length > 0) {
-      filters.tags = tags
+    const tag = searchParams.get('tag')
+    if (tag) {
+      filters.tags = tag
     }
 
     // 検索フィルタ

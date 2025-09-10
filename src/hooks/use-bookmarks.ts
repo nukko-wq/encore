@@ -6,12 +6,29 @@ import type { Bookmark, BookmarkFilters } from '@/types/database'
 export function useBookmarks(filters?: BookmarkFilters) {
   const { user } = useAuth()
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  const [allBookmarks, setAllBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   // stale closure対策：常に最新のbookmarks状態をrefで保持
   const bookmarksRef = useRef(bookmarks)
   bookmarksRef.current = bookmarks
+
+  // 全ブックマーク取得関数（フィルターなし）
+  const fetchAllBookmarks = useCallback(async () => {
+    try {
+      const url = '/api/bookmarks'
+      const response = await fetch(url)
+
+      if (!response.ok) {
+        throw new Error('全ブックマークの取得に失敗しました')
+      }
+      const result = await response.json()
+      setAllBookmarks(result.data || [])
+    } catch (err) {
+      console.error('Error fetching all bookmarks:', err)
+    }
+  }, [])
 
   // ブックマーク取得関数（useCallbackで依存関係を管理）
   const fetchBookmarks = useCallback(async () => {
@@ -34,10 +51,8 @@ export function useBookmarks(filters?: BookmarkFilters) {
       if (filters?.is_pinned !== undefined)
         params.append('is_pinned', String(filters.is_pinned))
       if (filters?.search) params.append('search', filters.search)
-      if (filters?.tags?.length) {
-        for (const tag of filters.tags) {
-          params.append('tags', tag)
-        }
+      if (filters?.tags) {
+        params.append('tag', filters.tags)
       }
 
       const url = `/api/bookmarks${params.toString() ? `?${params.toString()}` : ''}`
@@ -61,8 +76,8 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
   // 初回データ取得
   useEffect(() => {
-    fetchBookmarks()
-  }, [fetchBookmarks])
+    Promise.all([fetchBookmarks(), fetchAllBookmarks()])
+  }, [fetchBookmarks, fetchAllBookmarks])
 
   // Supabase Realtimeでリアルタイム更新（フィルターなし、クライアント側で処理）
   useEffect(() => {
@@ -899,6 +914,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
   return {
     bookmarks,
+    allBookmarks,
     loading,
     error,
     createBookmark,
