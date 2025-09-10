@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import SignOutButton from '@/components/common/sign-out-button'
 import TagEditForm from '@/components/tags/tag-edit-form'
 import TagForm from '@/components/tags/tag-form'
-import TagsTree from '@/components/tags/tags-tree'
+import TagsList from '@/components/tags/tags-tree'
 import { type TagRow, useTags } from '@/hooks/use-tags'
 
 export default function TagsPage() {
@@ -213,7 +213,7 @@ export default function TagsPage() {
                       </div>
                     </div>
                   ) : (
-                    <TagsTree
+                    <TagsList
                       onTagSelect={handleTagSelect}
                       selectedTagId={selectedTagId}
                       onTagEdit={handleTagEdit}

@@ -3,31 +3,28 @@
 import { useCallback, useState } from 'react'
 import { type TagRow, useTags } from '@/hooks/use-tags'
 
-interface TagsTreeProps {
+interface TagsListProps {
   onTagSelect?: (tagId: string) => void
   selectedTagId?: string
   onTagEdit?: (tag: TagRow) => void
 }
 
-export default function TagsTree({
+export default function TagsList({
   onTagSelect,
   selectedTagId,
   onTagEdit,
-}: TagsTreeProps) {
-  const { tags, loading, error, deleteTag } = useTags()
+}: TagsListProps) {
+  const { tags, loading, error, deleteTag, reorderTags } = useTags()
   const [draggedTag, setDraggedTag] = useState<string | null>(null)
 
   // ドラッグ開始
-  const handleDragStart = useCallback((e: React.DragEvent, tagId: string) => {
+  const handleDragStart = useCallback((tagId: string) => {
     setDraggedTag(tagId)
-    e.dataTransfer.setData('text/plain', tagId)
-    e.dataTransfer.effectAllowed = 'move'
   }, [])
 
   // ドロップ処理（並び順変更のみサポート）
   const handleDrop = useCallback(
-    async (e: React.DragEvent, targetTagId: string) => {
-      e.preventDefault()
+    async (targetTagId: string) => {
       if (!draggedTag || draggedTag === targetTagId) return
 
       try {
@@ -70,15 +67,21 @@ export default function TagsTree({
       const isSelected = selectedTagId === tag.id
 
       return (
-        <div key={tag.id} className="tag-item">
+        <div
+          key={tag.id}
+          className="tag-item"
+          draggable
+          onDragStart={() => handleDragStart(tag.id)}
+          onDrop={(e) => {
+            e.preventDefault()
+            handleDrop(tag.id)
+          }}
+          onDragOver={handleDragOver}
+        >
           <div
             className={`flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer transition-colors group ${
               isSelected ? 'bg-blue-100 hover:bg-blue-150' : ''
             }`}
-            draggable
-            onDragStart={(e) => handleDragStart(e, tag.id)}
-            onDrop={(e) => handleDrop(e, tag.id)}
-            onDragOver={handleDragOver}
             onClick={() => onTagSelect?.(tag.id)}
           >
             {/* タグカラー */}
