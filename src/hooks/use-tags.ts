@@ -16,6 +16,7 @@ export function useTags() {
   const { user } = useAuth()
   const [tags, setTags] = useState<TagRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -31,11 +32,15 @@ export function useTags() {
   }
 
   // タグ取得関数（useCallbackで依存関係を管理）
-  const fetchTags = useCallback(async () => {
+  const fetchTags = useCallback(async (force = false) => {
     if (!user) return
 
-    try {
+    // 初回or強制更新時のみloading表示
+    if (!isInitialized || force) {
       setLoading(true)
+    }
+
+    try {
       const { data, error } = await supabase
         .from('tags')
         .select('*')
@@ -47,6 +52,7 @@ export function useTags() {
       const tagData = data || []
       setTags(tagData)
       setError(null)
+      setIsInitialized(true)
 
       if (process.env.NODE_ENV === 'development') {
         console.log('✅ Tags fetched successfully:', { count: tagData.length })
@@ -55,16 +61,19 @@ export function useTags() {
       console.error('Error fetching tags:', err)
       setError(err instanceof Error ? err.message : 'タグの取得に失敗しました')
     } finally {
-      setLoading(false)
+      if (!isInitialized || force) {
+        setLoading(false)
+      }
     }
-  }, [user])
+  }, [user, isInitialized])
 
-  // 初回タグ取得
+  // 初回タグ取得（初期化されていない場合のみ）
   useEffect(() => {
-    if (user) {
+    if (user && !isInitialized) {
       fetchTags()
     }
-  }, [fetchTags, user])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isInitialized]) // fetchTagsを意図的に依存関係から除外
 
 
   const createTag = useCallback(
@@ -206,8 +215,8 @@ export function useTags() {
 
         await Promise.all(promises)
         
-        // 更新後に再取得してステート更新
-        await fetchTags()
+        // 更新後に再取得してステート更新（強制更新）
+        await fetchTags(true)
         setError(null)
         
         console.log('✅ Tags reordered successfully')
@@ -224,6 +233,7 @@ export function useTags() {
   return {
     tags,
     loading,
+    isInitialized,
     isCreating,
     isUpdating,
     isDeleting,
@@ -232,6 +242,6 @@ export function useTags() {
     updateTag,
     deleteTag,
     reorderTags,
-    refetch: fetchTags,
+    refetch: () => fetchTags(true), // 手動更新は強制更新
   }
 }
