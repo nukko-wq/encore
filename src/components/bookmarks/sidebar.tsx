@@ -119,7 +119,7 @@ export default function BookmarksSidebar({
   }
 
   return (
-    <div className="hidden lg:flex w-64 min-h-screen bg-white border-r border-gray-200 flex-col">
+    <div className="hidden lg:flex w-64 min-h-screen border-r border-gray-200 flex-col shadow-sm">
       {/* ヘッダー */}
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center justify-between">
