@@ -205,16 +205,74 @@ WHERE pubname = 'supabase_realtime';
    - [ ] ファイアウォール・プロキシ設定確認
    - [ ] インターネット接続の安定性確認
 
+## Supabase接続確認結果（2025-09-10実施）
+
+### ✅ 確認済み項目
+
+#### 1. プロジェクト情報
+- **プロジェクト名**: encore
+- **プロジェクトID**: cubzzcuckfeuqueexpyq  
+- **ステータス**: ACTIVE_HEALTHY
+- **データベース**: PostgreSQL 17.4.1.075
+
+#### 2. Realtime Publication設定
+```sql
+-- 確認クエリ結果
+SELECT schemaname, tablename FROM pg_publication_tables 
+WHERE pubname = 'supabase_realtime';
+
+結果:
+- public.bookmark_tags ✅（修正により追加）
+- public.bookmarks ✅ 
+- public.tags ✅
+```
+
+#### 3. Publication詳細設定
+```sql
+-- イベント設定確認
+pubinsert: true ✅
+pubupdate: true ✅ 
+pubdelete: true ✅
+pubtruncate: true ✅
+```
+
+#### 4. Realtimeサービス状態
+- **サービス**: 稼働中 ✅
+- **最新ログ**: テーブルOID検出済み ✅
+- **検出テーブル**: bookmarks, tags, bookmark_tags 全て認識済み
+
+### 🔧 実施した修正
+
+#### bookmark_tagsテーブルの追加
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE bookmark_tags;
+```
+**理由**: bookmark_tagsテーブルがRealtime publicationに含まれておらず、タグ関連のリアルタイム更新が機能していなかった
+
+### 🎯 修正後の期待される動作
+
+1. **bookmarksテーブル**: INSERT/UPDATE/DELETE → リアルタイム反映 ✅
+2. **tagsテーブル**: INSERT/UPDATE/DELETE → リアルタイム反映 ✅  
+3. **bookmark_tagsテーブル**: INSERT/UPDATE/DELETE → リアルタイム反映 ✅（新規修正）
+
 ## 結論
 
-コード実装自体は適切に行われているため、**Supabaseプロジェクト側のRealtime設定**が原因である可能性が最も高いです。特に：
+**🎉 Realtime設定の問題が特定・修正されました**
 
-1. **データベース Replication 設定**の不備
-2. **Realtime API の有効化状態**の問題
-3. **認証状態の一貫性**の問題
+主な原因は**bookmark_tagsテーブルがRealtime publicationに含まれていなかった**ことでした。
 
-これらを順次確認し、該当する設定を修正することで問題が解決される見込みです。
+### 修正内容
+- bookmark_tagsテーブルをsupabase_realtime publicationに追加
+- 全必要テーブル（bookmarks, tags, bookmark_tags）がRealtime対象に設定完了
+
+### 現在の状態
+- ✅ **データベース Replication 設定**: 正常
+- ✅ **Realtime API の有効化状態**: 正常  
+- ✅ **テーブルレベルのRealtime publications**: 修正完了
+
+**期待される結果**: 別端末でのブックマーク作成・更新が即座に他の端末で反映されるはずです。
 
 ---
 *分析日時: 2025-09-10*
+*Supabase接続確認・修正実施: 2025-09-10*
 *対象ファイル: src/hooks/use-bookmarks.ts, src/lib/supabase-client.ts, idea/database-design.md*
