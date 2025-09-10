@@ -224,7 +224,7 @@ export default function BookmarksPage() {
             {showMobileTagFilter && (
               <div className="fixed inset-0 z-50 lg:hidden">
                 <button
-                  className="fixed inset-0 bg-black bg-opacity-25"
+                  className="fixed inset-0 bg-black/25"
                   onClick={() => setShowMobileTagFilter(false)}
                   type="button"
                   aria-label="モーダルを閉じる"
