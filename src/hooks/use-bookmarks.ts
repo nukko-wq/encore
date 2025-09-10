@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/components/common/auth-provider'
+import { supabase } from '@/lib/supabase'
 import type { Bookmark, BookmarkFilters } from '@/types/database'
 
 export function useBookmarks(filters?: BookmarkFilters) {
@@ -119,7 +119,10 @@ export function useBookmarks(filters?: BookmarkFilters) {
                   prev.filter((bookmark) => bookmark.id !== deletedId),
                 )
               } else {
-                console.warn('Unknown realtime event type:', (payload as any).eventType)
+                console.warn(
+                  'Unknown realtime event type:',
+                  (payload as any).eventType,
+                )
               }
             } catch (error) {
               console.error(

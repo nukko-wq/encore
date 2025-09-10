@@ -1,14 +1,14 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Popover } from 'react-aria-components'
 import { useBookmarkTags } from '@/hooks/use-bookmark-tags'
 import { useTagSearch } from '@/hooks/use-tag-search'
+import type { Bookmark } from '@/types/database'
 import CurrentTagsList from './current-tags-list'
+import TagColorPicker from './tag-color-picker'
 import TagSearchInput from './tag-search-input'
 import TagSuggestions from './tag-suggestions'
-import TagColorPicker from './tag-color-picker'
-import type { Bookmark } from '@/types/database'
 
 interface BookmarkTagManagerProps {
   bookmark: Bookmark

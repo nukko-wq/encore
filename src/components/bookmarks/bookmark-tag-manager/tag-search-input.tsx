@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Input, Label } from 'react-aria-components'
 
 interface TagSearchInputProps {

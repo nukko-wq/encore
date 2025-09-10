@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import TagsTree from '@/components/tags/tags-tree'
-import TagForm from '@/components/tags/tag-form'
-import TagEditForm from '@/components/tags/tag-edit-form'
 import SignOutButton from '@/components/common/sign-out-button'
-import { useTags, type TagRow } from '@/hooks/use-tags'
+import TagEditForm from '@/components/tags/tag-edit-form'
+import TagForm from '@/components/tags/tag-form'
+import TagsTree from '@/components/tags/tags-tree'
+import { type TagRow, useTags } from '@/hooks/use-tags'
 
 export default function TagsPage() {
   const { tags, tagsTree, loading: isLoading, error } = useTags()

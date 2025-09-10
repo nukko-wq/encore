@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { useTags, type TagRow } from '@/hooks/use-tags'
+import { useCallback, useState } from 'react'
+import { type TagRow, useTags } from '@/hooks/use-tags'
 
 interface TagFormProps {
   parentTagId?: string

@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { useTags, type TagWithChildren, type TagRow } from '@/hooks/use-tags'
+import { useCallback, useEffect, useState } from 'react'
+import { type TagRow, type TagWithChildren, useTags } from '@/hooks/use-tags'
 
 interface TagsTreeProps {
   onTagSelect?: (tagId: string) => void
@@ -181,7 +181,7 @@ export default function TagsTree({
 
           {/* 子タグの再帰レンダリング */}
           {hasChildren && isExpanded && (
-            <div className="tag-children">{tag.children!.map(renderTag)}</div>
+            <div className="tag-children">{tag.children?.map(renderTag)}</div>
           )}
         </div>
       )
