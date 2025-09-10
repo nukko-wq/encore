@@ -239,6 +239,7 @@ function buildTagTree(tags: TagRow[]): TagWithChildren[] {
 
         // 親タグ内でdisplay_orderでソート
         parent.children.sort((a, b) => a.display_order - b.display_order)
+      } else {
       }
     } else {
       // ルートタグの場合

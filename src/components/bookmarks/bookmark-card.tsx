@@ -61,8 +61,8 @@ export default function BookmarkCard({
         className="absolute bottom-2 right-2 z-10"
         onClick={(e) => e.stopPropagation()}
       >
-        <MenuTrigger 
-          isOpen={isMenuOpen && !isTagManagerOpen} 
+        <MenuTrigger
+          isOpen={isMenuOpen && !isTagManagerOpen}
           onOpenChange={(open) => {
             // タグマネージャーが開いている時はメニューを開かない
             if (!isTagManagerOpen) {
@@ -106,7 +106,7 @@ export default function BookmarkCard({
                   fill="currentColor"
                 >
                   <title>タグ</title>
-                  <path d="m240-160 40-160H120l20-80h160l40-160H180l20-80h160l40-160h80l-40 160h160l40-160h80l-40 160h160l-20 80H660l-40 160h160l-20 80H600l-40 160h-80l40-160H360l-40 160h-80Zm140-240h160l40-160H420l-40 160Z"/>
+                  <path d="m240-160 40-160H120l20-80h160l40-160H180l20-80h160l40-160h80l-40 160h160l40-160h80l-40 160h160l-20 80H660l-40 160h160l-20 80H600l-40 160h-80l40-160H360l-40 160h-80Zm140-240h160l40-160H420l-40 160Z" />
                 </svg>
                 タグ
               </MenuItem>

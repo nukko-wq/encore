@@ -1,10 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import {
-  Button,
-  Popover,
-} from 'react-aria-components'
+import { Button, Popover } from 'react-aria-components'
 import { useBookmarkTags } from '@/hooks/use-bookmark-tags'
 import { useTagSearch } from '@/hooks/use-tag-search'
 import CurrentTagsList from './current-tags-list'
@@ -51,7 +48,7 @@ export default function BookmarkTagManager({
 
   // 現在付いているタグのIDセット（高速検索用）- useMemoで最適化
   const currentTagIds = useMemo(() => {
-    return new Set(currentTags.map(tag => tag.id))
+    return new Set(currentTags.map((tag) => tag.id))
   }, [currentTags])
 
   // タグ選択/削除のハンドラー
@@ -59,7 +56,7 @@ export default function BookmarkTagManager({
     async (tagId: string) => {
       try {
         // 最新のcurrentTagsを直接チェックして依存関係の問題を回避
-        const isCurrentlyTagged = currentTags.some(tag => tag.id === tagId)
+        const isCurrentlyTagged = currentTags.some((tag) => tag.id === tagId)
         if (isCurrentlyTagged) {
           await removeTag(tagId)
         } else {
@@ -131,7 +128,10 @@ export default function BookmarkTagManager({
         <div className="p-4 space-y-4">
           {/* ヘッダー */}
           <div className="flex items-center justify-between">
-            <h3 id="tag-manager-title" className="text-sm font-medium text-gray-900">
+            <h3
+              id="tag-manager-title"
+              className="text-sm font-medium text-gray-900"
+            >
               タグを管理
             </h3>
             <Button
@@ -139,8 +139,18 @@ export default function BookmarkTagManager({
               className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center outline-none"
               aria-label="閉じる"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </Button>
           </div>

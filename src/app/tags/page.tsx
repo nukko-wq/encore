@@ -13,8 +13,12 @@ export default function TagsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingTag, setEditingTag] = useState<TagRow | null>(null)
-  const [selectedParentId, setSelectedParentId] = useState<string | undefined>(undefined)
-  const [selectedTagId, setSelectedTagId] = useState<string | undefined>(undefined)
+  const [selectedParentId, setSelectedParentId] = useState<string | undefined>(
+    undefined,
+  )
+  const [selectedTagId, setSelectedTagId] = useState<string | undefined>(
+    undefined,
+  )
   const [user, setUser] = useState<{ email?: string } | null>(null)
 
   useEffect(() => {
@@ -62,7 +66,9 @@ export default function TagsPage() {
     setEditingTag(null)
   }
 
-  const selectedTag = selectedTagId ? tags.find(t => t.id === selectedTagId) : null
+  const selectedTag = selectedTagId
+    ? tags.find((t) => t.id === selectedTagId)
+    : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -111,9 +117,7 @@ export default function TagsPage() {
           <div className="py-6">
             <div className="mb-8 flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  タグ管理
-                </h1>
+                <h1 className="text-2xl font-bold text-gray-900">タグ管理</h1>
                 <p className="mt-1 text-sm text-gray-600">
                   階層タグの作成・編集・整理を行います
                 </p>
@@ -165,7 +169,9 @@ export default function TagsPage() {
                   {isLoading ? (
                     <div className="text-center py-12">
                       <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                      <p className="mt-2 text-sm text-gray-500">読み込み中...</p>
+                      <p className="mt-2 text-sm text-gray-500">
+                        読み込み中...
+                      </p>
                     </div>
                   ) : tags.length === 0 ? (
                     <div className="text-center py-12">
@@ -227,7 +233,7 @@ export default function TagsPage() {
                   <h3 className="text-lg font-medium text-gray-900 mb-4">
                     {selectedTag ? 'タグ詳細' : 'タグ統計'}
                   </h3>
-                  
+
                   {selectedTag ? (
                     <div className="space-y-4">
                       <div>
@@ -239,20 +245,25 @@ export default function TagsPage() {
                             className="w-4 h-4 rounded-full flex-shrink-0"
                             style={{ backgroundColor: selectedTag.color }}
                           />
-                          <span className="text-sm text-gray-900">{selectedTag.name}</span>
+                          <span className="text-sm text-gray-900">
+                            {selectedTag.name}
+                          </span>
                         </div>
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700">
                           作成日
                         </label>
                         <p className="mt-1 text-sm text-gray-500">
-                          {new Date(selectedTag.created_at).toLocaleDateString('ja-JP', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric'
-                          })}
+                          {new Date(selectedTag.created_at).toLocaleDateString(
+                            'ja-JP',
+                            {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                            },
+                          )}
                         </p>
                       </div>
 
@@ -276,7 +287,7 @@ export default function TagsPage() {
                           {tags.length}
                         </p>
                       </div>
-                      
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700">
                           ルートタグ数
@@ -293,10 +304,17 @@ export default function TagsPage() {
                           </label>
                           <div className="space-y-2">
                             {tags
-                              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                              .sort(
+                                (a, b) =>
+                                  new Date(b.created_at).getTime() -
+                                  new Date(a.created_at).getTime(),
+                              )
                               .slice(0, 3)
                               .map((tag) => (
-                                <div key={tag.id} className="flex items-center space-x-2">
+                                <div
+                                  key={tag.id}
+                                  className="flex items-center space-x-2"
+                                >
                                   <div
                                     className="w-3 h-3 rounded-full flex-shrink-0"
                                     style={{ backgroundColor: tag.color }}
@@ -323,17 +341,25 @@ export default function TagsPage() {
         <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">
-                新しいタグ
-              </h3>
+              <h3 className="text-lg font-medium text-gray-900">新しいタグ</h3>
               <button
                 type="button"
                 onClick={() => setShowCreateModal(false)}
                 className="text-gray-400 hover:text-gray-500"
               >
                 <span className="sr-only">閉じる</span>
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="w-6 h-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </div>

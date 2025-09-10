@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useTags, type TagWithChildren, type TagRow } from '@/hooks/use-tags'
 
 interface TagsTreeProps {
@@ -18,6 +18,19 @@ export default function TagsTree({
     useTags()
   const [draggedTag, setDraggedTag] = useState<string | null>(null)
   const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set())
+
+  // タグツリーが更新されたときに、子を持つルートタグを自動展開
+  useEffect(() => {
+    if (tagsTree.length > 0) {
+      const newExpandedTags = new Set<string>()
+      tagsTree.forEach((rootTag) => {
+        if (rootTag.children && rootTag.children.length > 0) {
+          newExpandedTags.add(rootTag.id)
+        }
+      })
+      setExpandedTags(newExpandedTags)
+    }
+  }, [tagsTree])
 
   // タグの展開/折りたたみ
   const toggleExpand = useCallback((tagId: string) => {
@@ -210,6 +223,7 @@ export default function TagsTree({
       </div>
     )
   }
+
 
   return (
     <div className="tags-tree">

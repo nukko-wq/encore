@@ -25,8 +25,10 @@ export default function TagSuggestions({
   isLoading = false,
 }: TagSuggestionsProps) {
   // 選択されていないタグのみを表示
-  const availableFrequentTags = frequentTags.filter(tag => !selectedTagIds.has(tag.id))
-  const availableAllTags = allTags.filter(tag => !selectedTagIds.has(tag.id))
+  const availableFrequentTags = frequentTags.filter(
+    (tag) => !selectedTagIds.has(tag.id),
+  )
+  const availableAllTags = allTags.filter((tag) => !selectedTagIds.has(tag.id))
 
   const renderTagButton = (tag: TagRow, isSelected: boolean) => (
     <Button
@@ -47,8 +49,18 @@ export default function TagSuggestions({
       />
       <span className="truncate">{tag.name}</span>
       {isSelected && (
-        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        <svg
+          className="w-4 h-4 flex-shrink-0"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M5 13l4 4L19 7"
+          />
         </svg>
       )}
     </Button>
@@ -78,8 +90,8 @@ export default function TagSuggestions({
             よく使うタグ
           </h4>
           <div className="flex flex-wrap gap-2">
-            {availableFrequentTags.map((tag) => 
-              renderTagButton(tag, selectedTagIds.has(tag.id))
+            {availableFrequentTags.map((tag) =>
+              renderTagButton(tag, selectedTagIds.has(tag.id)),
             )}
           </div>
         </div>
@@ -90,15 +102,15 @@ export default function TagSuggestions({
         <h4 className="text-xs font-medium text-gray-700 uppercase tracking-wide">
           {searchQuery ? '検索結果' : 'すべてのタグ'}
         </h4>
-        
+
         {availableAllTags.length === 0 ? (
           <div className="text-sm text-gray-500 text-center py-4">
             {searchQuery ? 'タグが見つかりません' : 'タグがありません'}
           </div>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {availableAllTags.map((tag) => 
-              renderTagButton(tag, selectedTagIds.has(tag.id))
+            {availableAllTags.map((tag) =>
+              renderTagButton(tag, selectedTagIds.has(tag.id)),
             )}
           </div>
         )}
@@ -112,8 +124,18 @@ export default function TagSuggestions({
             isDisabled={isLoading}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-green-600 bg-green-50 hover:bg-green-100 rounded-md outline-none transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
             </svg>
             新しいタグ「{searchQuery.trim()}」を作成
           </Button>
