@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/components/common/auth-provider'
-import type { BookmarkTag, CreateBookmarkTagData } from '@/types/database'
+import { supabase } from '@/lib/supabase'
+import type { BookmarkTag } from '@/types/database'
 import type { TagRow } from './use-tags'
 
 interface BookmarkTagsResult {
@@ -93,7 +93,6 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
             id,
             name,
             color,
-            parent_tag_id,
             display_order,
             created_at
           )
@@ -124,43 +123,6 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
       fetchBookmarkTags()
     }
   }, [fetchBookmarkTags, user, bookmarkId])
-
-  // Supabase Realtimeでリアルタイム更新
-  useEffect(() => {
-    if (!user || !bookmarkId) return
-
-    const setupRealtime = () => {
-      const channel = supabase
-        .channel(`bookmark-tags-${bookmarkId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'bookmark_tags',
-            filter: `bookmark_id=eq.${bookmarkId}`,
-          },
-          (payload) => {
-            console.log('Realtime bookmark_tags change:', payload)
-            // 楽観的更新と競合しないよう、少し遅延して再取得
-            setTimeout(() => {
-              fetchBookmarkTags()
-            }, 500)
-          },
-        )
-        .subscribe((status) => {
-          console.log('Bookmark tags realtime subscription status:', status)
-        })
-
-      return () => {
-        console.log('Unsubscribing from bookmark tags realtime channel')
-        channel.unsubscribe()
-      }
-    }
-
-    const cleanup = setupRealtime()
-    return cleanup
-  }, [user, bookmarkId, fetchBookmarkTags])
 
   // タグ追加（楽観的更新）
   const addTag = useCallback(
@@ -200,7 +162,6 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
               id,
               name,
               color,
-              parent_tag_id,
               display_order,
               created_at
             )
@@ -220,7 +181,7 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
 
         console.log('✅ Tag added successfully:', data)
 
-        // 成功時のみ楽観的更新（Realtimeで更新されるので実際にはこれも不要だが、UX向上のため）
+        // 成功時のみ楽観的更新
         setBookmarkTags((prev) => [...prev, data])
         if (data.tags) {
           setTags((prev) => [...prev, data.tags as TagRow])
@@ -239,7 +200,7 @@ export function useBookmarkTags(bookmarkId: string): BookmarkTagsResult {
         throw new Error(errorMessage)
       }
     },
-    [user, bookmarkId, bookmarkTags],
+    [user, bookmarkId, bookmarkTags, verifyPermissions],
   )
 
   // タグ削除（楽観的更新）

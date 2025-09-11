@@ -137,8 +137,7 @@ create table if not exists public.tags (
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   color text default '#6366f1',
-  parent_tag_id uuid references tags(id), -- 階層構造（親タグへの参照）
-  display_order integer default 0, -- 同じ階層での並び順制御
+  display_order integer default 0, -- 並び順制御
   created_at timestamptz default now(),
   unique(user_id, name)
 );
@@ -299,7 +298,7 @@ CREATE INDEX idx_bookmarks_status_pinned ON bookmarks(status, is_pinned) WHERE s
 CREATE UNIQUE INDEX uniq_bookmarks_user_canonical 
   ON bookmarks (user_id, canonical_url);
 CREATE INDEX idx_tags_user_id ON tags(user_id);
-CREATE INDEX idx_tags_parent_order ON tags(user_id, parent_tag_id, display_order); -- 階層表示用
+CREATE INDEX idx_tags_display_order ON tags(user_id, display_order); -- 並び順表示用
 CREATE INDEX idx_bookmark_tags_bookmark_id ON bookmark_tags(bookmark_id);
 CREATE INDEX idx_bookmark_tags_tag_id ON bookmark_tags(tag_id);
 CREATE INDEX idx_bookmark_metadata_bookmark_id ON bookmark_metadata(bookmark_id);

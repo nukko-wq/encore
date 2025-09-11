@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useRef, useState } from 'react'
 import {
   Button,
   Menu,
@@ -8,9 +8,9 @@ import {
   MenuTrigger,
   Popover,
 } from 'react-aria-components'
-import BookmarkTagManager from './bookmark-tag-manager'
 import { useBookmarkTags } from '@/hooks/use-bookmark-tags'
 import type { Bookmark } from '@/types/database'
+import BookmarkTagManager from './bookmark-tag-manager'
 
 interface BookmarkCardProps {
   bookmark: Bookmark

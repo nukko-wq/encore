@@ -28,6 +28,11 @@ export class BookmarkService {
     const sortOrder = pagination?.sort_order ?? 'desc'
     const offset = (page - 1) * limit
 
+    // タグフィルタがある場合は、特別な処理を行う
+    if (filters?.tags) {
+      return this.getBookmarksWithTagFilter(filters, pagination)
+    }
+
     // 総件数取得用クエリ
     let countQuery = supabase
       .from('bookmarks')
@@ -56,6 +61,14 @@ export class BookmarkService {
 
       if (filters?.is_pinned !== undefined) {
         query = query.eq('is_pinned', filters.is_pinned)
+      }
+
+      // 検索フィルタ（タイトル、説明、メモで検索）
+      if (filters?.search) {
+        const searchTerm = `%${filters.search}%`
+        query = query.or(
+          `title.ilike.${searchTerm},description.ilike.${searchTerm},memo.ilike.${searchTerm}`,
+        )
       }
 
       return query
@@ -89,6 +102,173 @@ export class BookmarkService {
       limit,
       has_next: offset + limit < total,
       has_prev: page > 1,
+    }
+  }
+
+  /**
+   * タグフィルタ付きのブックマーク取得
+   */
+  private async getBookmarksWithTagFilter(
+    filters: BookmarkFilters,
+    pagination?: PaginationOptions,
+  ): Promise<BookmarkSearchResult> {
+    const supabase = await this.getClient()
+
+    // デフォルト値設定
+    const page = pagination?.page ?? 1
+    const limit = Math.min(pagination?.limit ?? 20, 100)
+    const sortBy = pagination?.sort_by ?? 'created_at'
+    const sortOrder = pagination?.sort_order ?? 'desc'
+    const offset = (page - 1) * limit
+
+    // タグIDからブックマークIDを取得
+    const { data: bookmarkTags, error: tagError } = await supabase
+      .from('bookmark_tags')
+      .select('bookmark_id')
+      .eq('tag_id', filters.tags!)
+
+    if (tagError) {
+      throw new Error(`タグフィルタの処理に失敗しました: ${tagError.message}`)
+    }
+
+    const bookmarkIds = bookmarkTags?.map((bt) => bt.bookmark_id) || []
+
+    // タグに該当するブックマークがない場合
+    if (bookmarkIds.length === 0) {
+      return {
+        bookmarks: [],
+        total: 0,
+        page,
+        limit,
+        has_next: false,
+        has_prev: page > 1,
+      }
+    }
+
+    // 総件数取得用クエリ
+    let countQuery = supabase
+      .from('bookmarks')
+      .select('*', { count: 'exact', head: true })
+      .in('id', bookmarkIds)
+
+    // データ取得用クエリ
+    let dataQuery = supabase
+      .from('bookmarks')
+      .select('*')
+      .in('id', bookmarkIds)
+      .order(sortBy, { ascending: sortOrder === 'asc' })
+      .range(offset, offset + limit - 1)
+
+    // 他のフィルタを適用
+    const applyOtherFilters = (query: any) => {
+      if (filters?.status) {
+        if (Array.isArray(filters.status)) {
+          query = query.in('status', filters.status)
+        } else {
+          query = query.eq('status', filters.status)
+        }
+      }
+
+      if (filters?.is_favorite !== undefined) {
+        query = query.eq('is_favorite', filters.is_favorite)
+      }
+
+      if (filters?.is_pinned !== undefined) {
+        query = query.eq('is_pinned', filters.is_pinned)
+      }
+
+      if (filters?.search) {
+        const searchTerm = `%${filters.search}%`
+        query = query.or(
+          `title.ilike.${searchTerm},description.ilike.${searchTerm},memo.ilike.${searchTerm}`,
+        )
+      }
+
+      return query
+    }
+
+    countQuery = applyOtherFilters(countQuery)
+    dataQuery = applyOtherFilters(dataQuery)
+
+    // 並行実行で総件数とデータを取得
+    const [countResult, dataResult] = await Promise.all([countQuery, dataQuery])
+
+    if (countResult.error) {
+      throw new Error(
+        `ブックマーク数の取得に失敗しました: ${countResult.error.message}`,
+      )
+    }
+
+    if (dataResult.error) {
+      throw new Error(
+        `ブックマークの取得に失敗しました: ${dataResult.error.message}`,
+      )
+    }
+
+    const total = countResult.count ?? 0
+    const bookmarks = dataResult.data || []
+
+    return {
+      bookmarks,
+      total,
+      page,
+      limit,
+      has_next: offset + limit < total,
+      has_prev: page > 1,
+    }
+  }
+
+  /**
+   * タグ情報付きブックマーク一覧取得
+   */
+  async getBookmarksWithTags(
+    filters?: BookmarkFilters,
+    pagination?: PaginationOptions,
+  ): Promise<BookmarkSearchResult> {
+    const result = await this.getBookmarks(filters, pagination)
+
+    if (result.bookmarks.length === 0) {
+      return result
+    }
+
+    const supabase = await this.getClient()
+    const bookmarkIds = result.bookmarks.map((b) => b.id)
+
+    // ブックマークのタグ情報を取得
+    const { data: bookmarkTags, error: tagError } = await supabase
+      .from('bookmark_tags')
+      .select(`
+        bookmark_id,
+        tag_id,
+        tags!inner (
+          id,
+          name,
+          color
+        )
+      `)
+      .in('bookmark_id', bookmarkIds)
+
+    if (tagError) {
+      console.warn('タグ情報の取得に失敗しました:', tagError)
+      return result
+    }
+
+    // ブックマークにタグ情報を追加
+    const bookmarksWithTags = result.bookmarks.map((bookmark) => {
+      const relatedTags =
+        bookmarkTags?.filter((bt) => bt.bookmark_id === bookmark.id) || []
+      return {
+        ...bookmark,
+        bookmark_tags: relatedTags.map((bt) => ({
+          tag_id: bt.tag_id,
+          tag: Array.isArray(bt.tags) ? bt.tags[0] : bt.tags,
+        })),
+      }
+    })
+
+    return {
+      ...result,
+      bookmarks: bookmarksWithTags as Bookmark[],
     }
   }
 

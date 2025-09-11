@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/components/common/auth-provider'
+import { supabase } from '@/lib/supabase'
 
 // タグの基本型（database.tsから取得予定）
 export interface TagRow {
@@ -8,103 +8,90 @@ export interface TagRow {
   user_id: string
   name: string
   color: string
-  parent_tag_id: string | null
   display_order: number
   created_at: string
-}
-
-// 階層構造を持つタグ型
-export interface TagWithChildren extends TagRow {
-  children?: TagWithChildren[]
-  level: number
 }
 
 export function useTags() {
   const { user } = useAuth()
   const [tags, setTags] = useState<TagRow[]>([])
-  const [tagsTree, setTagsTree] = useState<TagWithChildren[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // デバッグ: 最小限のログ
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🔍 useTags:', {
+      hasUser: !!user,
+      loading,
+      tagsCount: tags.length,
+    })
+  }
+
   // タグ取得関数（useCallbackで依存関係を管理）
-  const fetchTags = useCallback(async () => {
-    if (!user) return
+  const fetchTags = useCallback(
+    async (force = false) => {
+      if (!user) return
 
-    try {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('tags')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('parent_tag_id', { ascending: true, nullsFirst: true }) // 親タグを先に
-        .order('display_order', { ascending: true }) // 同階層内の順序
+      // 初回or強制更新時のみloading表示
+      if (!isInitialized || force) {
+        setLoading(true)
+      }
 
-      if (error) throw error
+      try {
+        const { data, error } = await supabase
+          .from('tags')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('display_order', { ascending: true }) // 表示順序
 
-      const tagData = data || []
-      setTags(tagData)
-      setTagsTree(buildTagTree(tagData))
-      setError(null)
-    } catch (err) {
-      console.error('Error fetching tags:', err)
-      setError(err instanceof Error ? err.message : 'タグの取得に失敗しました')
-    } finally {
-      setLoading(false)
-    }
-  }, [user])
+        if (error) throw error
 
-  // 初回タグ取得
+        const tagData = data || []
+        setTags(tagData)
+        setError(null)
+        setIsInitialized(true)
+
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ Tags fetched successfully:', {
+            count: tagData.length,
+          })
+        }
+      } catch (err) {
+        console.error('Error fetching tags:', err)
+        setError(
+          err instanceof Error ? err.message : 'タグの取得に失敗しました',
+        )
+      } finally {
+        if (!isInitialized || force) {
+          setLoading(false)
+        }
+      }
+    },
+    [user, isInitialized],
+  )
+
+  // 初回タグ取得（初期化されていない場合のみ）
   useEffect(() => {
-    if (user) {
+    if (user && !isInitialized) {
       fetchTags()
     }
-  }, [fetchTags, user])
-
-  // Supabase Realtimeでリアルタイム更新（ユーザースコープ絞り込み）
-  useEffect(() => {
-    if (!user) return
-
-    const setupRealtime = () => {
-      const channel = supabase
-        .channel(`tags-changes-${user.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'tags',
-            filter: `user_id=eq.${user.id}`, // ユーザースコープでフィルタ
-          },
-          (payload) => {
-            console.log('Realtime tag change:', payload)
-
-            // タグ更新時は階層構造を再構築するため全データを再取得
-            fetchTags()
-          },
-        )
-        .subscribe((status) => {
-          console.log('Tag realtime subscription status:', status)
-        })
-
-      return () => {
-        console.log('Unsubscribing from tag realtime channel')
-        channel.unsubscribe()
-      }
-    }
-
-    const cleanup = setupRealtime()
-    return cleanup
-  }, [user, fetchTags])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isInitialized]) // fetchTagsを意図的に依存関係から除外
 
   const createTag = useCallback(
-    async (data: {
-      name: string
-      color?: string
-      parent_tag_id?: string | null
-      display_order?: number
-    }) => {
+    async (data: { name: string; color?: string; display_order?: number }) => {
       if (!user) throw new Error('認証が必要です')
 
+      console.log('🚀 Creating tag via API:', {
+        name: data.name,
+        color: data.color || '#6366f1',
+      })
+
+      setIsCreating(true)
       try {
         const { data: newTag, error } = await supabase
           .from('tags')
@@ -117,12 +104,24 @@ export function useTags() {
           .single()
 
         if (error) throw error
+
+        // 手動でステート更新（即座反映）
+        setTags((prev) => [...prev, newTag])
+        setError(null)
+
+        console.log('✅ Tag created successfully:', {
+          id: newTag.id,
+          name: newTag.name,
+        })
+
         return newTag
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : 'タグの作成に失敗しました'
         setError(errorMessage)
         throw new Error(errorMessage)
+      } finally {
+        setIsCreating(false)
       }
     },
     [user],
@@ -132,6 +131,12 @@ export function useTags() {
     async (id: string, updates: Partial<TagRow>) => {
       if (!user) throw new Error('認証が必要です')
 
+      console.log('🚀 Updating tag via API:', {
+        id,
+        updates,
+      })
+
+      setIsUpdating(true)
       try {
         const { data: updatedTag, error } = await supabase
           .from('tags')
@@ -142,12 +147,24 @@ export function useTags() {
           .single()
 
         if (error) throw error
+
+        // 手動でステート更新（即座反映）
+        setTags((prev) => prev.map((tag) => (tag.id === id ? updatedTag : tag)))
+        setError(null)
+
+        console.log('✅ Tag updated successfully:', {
+          id: updatedTag.id,
+          name: updatedTag.name,
+        })
+
         return updatedTag
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : 'タグの更新に失敗しました'
         setError(errorMessage)
         throw new Error(errorMessage)
+      } finally {
+        setIsUpdating(false)
       }
     },
     [user],
@@ -157,6 +174,9 @@ export function useTags() {
     async (id: string) => {
       if (!user) throw new Error('認証が必要です')
 
+      console.log('🚀 Deleting tag via API:', id)
+
+      setIsDeleting(true)
       try {
         const { error } = await supabase
           .from('tags')
@@ -165,11 +185,19 @@ export function useTags() {
           .eq('user_id', user.id) // 安全のためuser_idもチェック
 
         if (error) throw error
+
+        // 手動でステート更新（即座反映）
+        setTags((prev) => prev.filter((tag) => tag.id !== id))
+        setError(null)
+
+        console.log('✅ Tag deleted successfully:', { id })
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : 'タグの削除に失敗しました'
         setError(errorMessage)
         throw new Error(errorMessage)
+      } finally {
+        setIsDeleting(false)
       }
     },
     [user],
@@ -192,6 +220,12 @@ export function useTags() {
         )
 
         await Promise.all(promises)
+
+        // 更新後に再取得してステート更新（強制更新）
+        await fetchTags(true)
+        setError(null)
+
+        console.log('✅ Tags reordered successfully')
       } catch (err) {
         const errorMessage =
           err instanceof Error ? err.message : 'タグの並び順更新に失敗しました'
@@ -199,56 +233,21 @@ export function useTags() {
         throw new Error(errorMessage)
       }
     },
-    [user],
+    [user, fetchTags],
   )
 
   return {
     tags,
-    tagsTree,
     loading,
+    isInitialized,
+    isCreating,
+    isUpdating,
+    isDeleting,
     error,
     createTag,
     updateTag,
     deleteTag,
     reorderTags,
-    refetch: fetchTags,
+    refetch: () => fetchTags(true), // 手動更新は強制更新
   }
-}
-
-// タグ階層ツリー構築ユーティリティ関数
-function buildTagTree(tags: TagRow[]): TagWithChildren[] {
-  const tagMap = new Map<string, TagWithChildren>()
-  const rootTags: TagWithChildren[] = []
-
-  // 1. マップ作成（全タグを初期化）
-  tags.forEach((tag) => {
-    tagMap.set(tag.id, { ...tag, children: [], level: 0 })
-  })
-
-  // 2. 階層構築
-  tags.forEach((tag) => {
-    const tagWithChildren = tagMap.get(tag.id)!
-
-    if (tag.parent_tag_id) {
-      // 子タグの場合
-      const parent = tagMap.get(tag.parent_tag_id)
-      if (parent) {
-        parent.children = parent.children || []
-        parent.children.push(tagWithChildren)
-        tagWithChildren.level = parent.level + 1
-
-        // 親タグ内でdisplay_orderでソート
-        parent.children.sort((a, b) => a.display_order - b.display_order)
-      } else {
-      }
-    } else {
-      // ルートタグの場合
-      rootTags.push(tagWithChildren)
-    }
-  })
-
-  // 3. ルートレベルでもdisplay_orderでソート
-  rootTags.sort((a, b) => a.display_order - b.display_order)
-
-  return rootTags
 }

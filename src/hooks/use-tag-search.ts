@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useTags } from './use-tags'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { TagRow } from './use-tags'
+import { useTags } from './use-tags'
 
 interface TagSearchResult {
   searchQuery: string
@@ -92,15 +92,12 @@ export function useTagSearch(): TagSearchResult {
         const newTag = await createTag({
           name: name.trim(),
           color,
-          parent_tag_id: null,
           display_order: 0,
         })
 
         // 検索クエリをクリア
         setSearchQuery('')
         return newTag
-      } catch (error) {
-        throw error
       } finally {
         setIsCreating(false)
       }

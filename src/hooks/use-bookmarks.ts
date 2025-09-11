@@ -1,53 +1,76 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '@/components/common/auth-provider'
+import { supabase } from '@/lib/supabase'
 import type { Bookmark, BookmarkFilters } from '@/types/database'
 
 export function useBookmarks(filters?: BookmarkFilters) {
   const { user } = useAuth()
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  const [allBookmarks, setAllBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // クライアントサイドフィルタリング
+  const bookmarks = useMemo(() => {
+    if (!allBookmarks) return []
+    
+    return allBookmarks.filter(bookmark => {
+      // タグフィルタリング
+      if (filters?.tags) {
+        const hasTag = bookmark.bookmark_tags?.some(
+          tagRelation => tagRelation.tag_id === filters.tags
+        )
+        if (!hasTag) return false
+      }
+      
+      // ステータスフィルタリング
+      if (filters?.status) {
+        if (Array.isArray(filters.status)) {
+          if (!filters.status.includes(bookmark.status)) return false
+        } else {
+          if (bookmark.status !== filters.status) return false
+        }
+      }
+      
+      // お気に入りフィルタリング
+      if (filters?.is_favorite !== undefined) {
+        if (bookmark.is_favorite !== filters.is_favorite) return false
+      }
+      
+      // ピン留めフィルタリング
+      if (filters?.is_pinned !== undefined) {
+        if (bookmark.is_pinned !== filters.is_pinned) return false
+      }
+      
+      // 検索フィルタリング
+      if (filters?.search) {
+        const searchTerm = filters.search.toLowerCase()
+        const titleMatch = bookmark.title?.toLowerCase().includes(searchTerm)
+        const descriptionMatch = bookmark.description?.toLowerCase().includes(searchTerm)
+        const memoMatch = bookmark.memo?.toLowerCase().includes(searchTerm)
+        
+        if (!titleMatch && !descriptionMatch && !memoMatch) return false
+      }
+      
+      return true
+    })
+  }, [allBookmarks, filters])
 
   // stale closure対策：常に最新のbookmarks状態をrefで保持
   const bookmarksRef = useRef(bookmarks)
   bookmarksRef.current = bookmarks
 
-  // ブックマーク取得関数（useCallbackで依存関係を管理）
-  const fetchBookmarks = useCallback(async () => {
+  // 全ブックマーク取得関数
+  const fetchAllBookmarks = useCallback(async () => {
     try {
       setLoading(true)
-
-      // URLパラメータ構築
-      const params = new URLSearchParams()
-      if (filters?.status) {
-        if (Array.isArray(filters.status)) {
-          for (const status of filters.status) {
-            params.append('status', status)
-          }
-        } else {
-          params.append('status', filters.status)
-        }
-      }
-      if (filters?.is_favorite !== undefined)
-        params.append('is_favorite', String(filters.is_favorite))
-      if (filters?.is_pinned !== undefined)
-        params.append('is_pinned', String(filters.is_pinned))
-      if (filters?.search) params.append('search', filters.search)
-      if (filters?.tags?.length) {
-        for (const tag of filters.tags) {
-          params.append('tags', tag)
-        }
-      }
-
-      const url = `/api/bookmarks${params.toString() ? `?${params.toString()}` : ''}`
+      const url = '/api/bookmarks'
       const response = await fetch(url)
 
       if (!response.ok) {
         throw new Error('ブックマークの取得に失敗しました')
       }
       const result = await response.json()
-      setBookmarks(result.data || [])
+      setAllBookmarks(result.data || [])
       setError(null)
     } catch (err) {
       console.error('Error fetching bookmarks:', err)
@@ -57,79 +80,520 @@ export function useBookmarks(filters?: BookmarkFilters) {
     } finally {
       setLoading(false)
     }
-  }, [filters])
+  }, [])
 
   // 初回データ取得
   useEffect(() => {
-    fetchBookmarks()
-  }, [fetchBookmarks])
+    fetchAllBookmarks()
+  }, [fetchAllBookmarks])
 
-  // Supabase Realtimeでリアルタイム更新（ユーザースコープ絞り込み）
+  // Supabase Realtimeでリアルタイム更新（フィルターなし、クライアント側で処理）
   useEffect(() => {
     if (!user) return
 
-    const setupRealtime = () => {
+    let reconnectTimeoutId: NodeJS.Timeout | null = null
+    let reconnectAttempts = 0
+    const maxReconnectAttempts = 5
+    let isUnmounted = false
+
+    const setupRealtime = (): (() => void) => {
+      console.log(
+        `🔧 Setting up Realtime for user: ${user.id} (attempt ${reconnectAttempts + 1})`,
+      )
+      const channelName = `bookmarks-changes-${user.id}`
+      console.log('📻 Creating channel:', channelName)
+
       const channel = supabase
-        .channel(`bookmarks-changes-${user.id}`)
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
             event: '*',
             schema: 'public',
             table: 'bookmarks',
-            filter: `user_id=eq.${user.id}`, // ユーザースコープでフィルタ
+            // RLSによるDELETEフィルター問題を回避するため、フィルターは使用しない
+            // filter: `user_id=eq.${user.id}`,
           },
           (payload) => {
-            console.log('Realtime bookmark change:', payload)
-
-            if (payload.eventType === 'INSERT') {
-              const newBookmark = payload.new as Bookmark
-              setBookmarks((prev) => {
-                // 楽観的更新で既に存在する場合は重複を避ける
-                const exists = prev.some((b) => b.id === newBookmark.id)
-                if (exists) return prev
-                return [newBookmark, ...prev]
+            try {
+              console.log('🔔 Realtime event received:', {
+                eventType: payload.eventType,
+                schema: payload.schema,
+                table: payload.table,
+                new: payload.new,
+                old: payload.old,
+                timestamp: new Date().toISOString(),
               })
-            } else if (payload.eventType === 'UPDATE') {
-              const updatedBookmark = payload.new as Bookmark
-              setBookmarks((prev) =>
-                prev.map((bookmark) =>
-                  bookmark.id === updatedBookmark.id
-                    ? updatedBookmark
-                    : bookmark,
-                ),
-              )
-            } else if (payload.eventType === 'DELETE') {
-              const deletedId = payload.old.id as string
-              setBookmarks((prev) =>
-                prev.filter((bookmark) => bookmark.id !== deletedId),
+
+              // DELETEイベントの処理（RLS政策対応）
+              if (payload.eventType === 'DELETE') {
+                const deletedId = payload.old.id as string
+                const deletedUserId = payload.old.user_id
+
+                console.log('🗑️ Processing DELETE event:', {
+                  deletedId,
+                  deletedUserId,
+                  currentUserId: user.id,
+                })
+
+                // user_idが取得できない場合は、現在のブックマーク一覧に存在するかをチェック
+                if (!deletedUserId || deletedUserId === undefined) {
+                  console.log(
+                    '⚠️ DELETE event has undefined user_id (RLS policy effect)',
+                  )
+                  console.log(
+                    "🔍 Checking if deleted bookmark exists in current user's bookmarks",
+                  )
+
+                  setAllBookmarks((prev) => {
+                    const targetBookmark = prev.find((b) => b.id === deletedId)
+
+                    if (!targetBookmark) {
+                      console.log(
+                        "❌ DELETE event for non-existent bookmark in current user's list:",
+                        deletedId,
+                      )
+                      console.log(
+                        '🔍 Available bookmark IDs:',
+                        prev.map((b) => b.id),
+                      )
+                      return prev
+                    }
+
+                    console.log(
+                      "✅ Found bookmark to delete in current user's list:",
+                      {
+                        id: targetBookmark.id,
+                        title: targetBookmark.title,
+                        isDeleting: (targetBookmark as any).isDeleting,
+                      },
+                    )
+
+                    // 楽観的削除との競合チェック
+                    const isOptimisticallyDeleted =
+                      (targetBookmark as any).isDeleting === true
+                    if (isOptimisticallyDeleted) {
+                      console.log(
+                        '🤝 Realtime DELETE confirms optimistic deletion:',
+                        deletedId,
+                      )
+                    } else {
+                      console.log(
+                        '⚡ Realtime DELETE from external source (extension, etc):',
+                        deletedId,
+                      )
+                    }
+
+                    const newBookmarks = prev.filter(
+                      (bookmark) => bookmark.id !== deletedId,
+                    )
+                    console.log('✅ Removing bookmark from state via realtime')
+                    console.log(
+                      '📊 Bookmarks count: before =',
+                      prev.length,
+                      ', after =',
+                      newBookmarks.length,
+                    )
+                    return newBookmarks
+                  })
+                  return
+                }
+
+                // user_idが取得できた場合は、ユーザーIDをチェック
+                if (deletedUserId !== user.id) {
+                  console.log(
+                    '🚫 Ignoring DELETE event for different user:',
+                    deletedUserId,
+                  )
+                  return
+                }
+
+                console.log('✅ DELETE event for current user, processing...')
+                setAllBookmarks((prev) => {
+                  const targetBookmark = prev.find((b) => b.id === deletedId)
+
+                  if (!targetBookmark) {
+                    console.log(
+                      '⚠️ DELETE event for non-existent bookmark, already removed:',
+                      deletedId,
+                    )
+                    return prev
+                  }
+
+                  const isOptimisticallyDeleted =
+                    (targetBookmark as any).isDeleting === true
+                  if (isOptimisticallyDeleted) {
+                    console.log(
+                      '🤝 Realtime DELETE confirms optimistic deletion:',
+                      deletedId,
+                    )
+                  } else {
+                    console.log(
+                      '⚡ Realtime DELETE from external source:',
+                      deletedId,
+                    )
+                  }
+
+                  return prev.filter((bookmark) => bookmark.id !== deletedId)
+                })
+                return
+              }
+
+              // INSERT/UPDATE イベントの詳細処理
+              if (
+                payload.eventType === 'INSERT' ||
+                payload.eventType === 'UPDATE'
+              ) {
+                const record = payload.new as any
+
+                console.log(
+                  '🔍 Detailed user ID comparison for INSERT/UPDATE:',
+                  {
+                    eventType: payload.eventType,
+                    recordUserId: record.user_id,
+                    recordUserIdType: typeof record.user_id,
+                    currentUserId: user.id,
+                    currentUserIdType: typeof user.id,
+                    isEqual: record.user_id === user.id,
+                    isStrictEqual: record.user_id === user.id,
+                    recordId: record.id,
+                  },
+                )
+
+                // ユーザーID未定義の場合の処理
+                if (!record.user_id || record.user_id === undefined) {
+                  console.log('⚠️ INSERT/UPDATE event has undefined user_id')
+
+                  if (payload.eventType === 'INSERT') {
+                    console.log(
+                      '🔍 Checking if this INSERT is for current user by other means',
+                    )
+                    // 楽観的更新との照合で判定
+                    setAllBookmarks((prev) => {
+                      const existingTempBookmark = prev.find((b) => {
+                        const isTemporary = (b as any).isLoading === true
+                        const urlMatch =
+                          isTemporary &&
+                          (b.canonical_url === record.canonical_url ||
+                            b.url === record.canonical_url ||
+                            b.canonical_url === record.url ||
+                            b.url === record.url)
+                        return urlMatch
+                      })
+
+                      if (existingTempBookmark) {
+                        console.log(
+                          '✅ Found matching temporary bookmark - this INSERT is for current user',
+                        )
+                        console.log(
+                          '🔄 Replacing temp bookmark with realtime data:',
+                          {
+                            tempId: existingTempBookmark.id,
+                            newId: record.id,
+                            url: record.canonical_url,
+                          },
+                        )
+                        return prev.map((bookmark) =>
+                          bookmark.id === existingTempBookmark.id
+                            ? record
+                            : bookmark,
+                        )
+                      }
+
+                      console.log(
+                        '❌ No matching temporary bookmark found - ignoring INSERT',
+                      )
+                      return prev
+                    })
+                  }
+                  return
+                }
+
+                // 通常のユーザーIDチェック
+                if (record.user_id !== user.id) {
+                  console.log(
+                    '🚫 Ignoring INSERT/UPDATE event for different user:',
+                    record.user_id,
+                  )
+                  return
+                }
+
+                console.log('✅ INSERT/UPDATE event confirmed for current user')
+              }
+
+              if (payload.eventType === 'INSERT') {
+                const newBookmark = payload.new as Bookmark
+                console.log(
+                  '➕ Processing INSERT event for bookmark:',
+                  newBookmark.id,
+                )
+                setAllBookmarks((prev) => {
+                  // 改善された重複チェックロジック
+                  // 1. IDベースでの重複チェック（一時ブックマークは除外）
+                  const existsById = prev.some((b) => {
+                    const isTemporary = (b as any).isLoading === true
+                    return !isTemporary && b.id === newBookmark.id
+                  })
+
+                  if (existsById) {
+                    console.log(
+                      '🔍 Bookmark ID already exists (non-temporary), skipping INSERT',
+                    )
+                    return prev
+                  }
+
+                  // 2. URLベースでの重複チェック（楽観的更新との競合を検出）
+                  const existingTempBookmark = prev.find((b) => {
+                    const isTemporary = (b as any).isLoading === true
+                    return (
+                      isTemporary &&
+                      (b.canonical_url === newBookmark.canonical_url ||
+                        b.url === newBookmark.canonical_url ||
+                        b.canonical_url === newBookmark.url ||
+                        b.url === newBookmark.url)
+                    )
+                  })
+
+                  if (existingTempBookmark) {
+                    console.log(
+                      '🔄 Found temporary bookmark with matching URL, replacing with realtime data:',
+                      {
+                        tempId: existingTempBookmark.id,
+                        newId: newBookmark.id,
+                        url: newBookmark.canonical_url,
+                      },
+                    )
+                    // 一時ブックマークを正式なブックマークに置換
+                    return prev.map((bookmark) =>
+                      bookmark.id === existingTempBookmark.id
+                        ? newBookmark
+                        : bookmark,
+                    )
+                  }
+
+                  console.log('✨ Adding new bookmark to state from realtime')
+                  return [newBookmark, ...prev]
+                })
+              } else if (payload.eventType === 'UPDATE') {
+                const updatedBookmark = payload.new as Bookmark
+                console.log(
+                  '📝 Processing UPDATE event for bookmark:',
+                  updatedBookmark.id,
+                )
+                setAllBookmarks((prev) => {
+                  const existingBookmark = prev.find(
+                    (b) => b.id === updatedBookmark.id,
+                  )
+
+                  if (!existingBookmark) {
+                    console.log(
+                      '⚠️ UPDATE event for non-existent bookmark, ignoring:',
+                      updatedBookmark.id,
+                    )
+                    return prev
+                  }
+
+                  // 楽観的更新との競合チェック
+                  const isOptimisticallyUpdating =
+                    (existingBookmark as Bookmark & { isUpdating?: boolean })
+                      .isUpdating === true
+                  if (isOptimisticallyUpdating) {
+                    console.log(
+                      '🤝 Realtime UPDATE confirms optimistic update:',
+                      {
+                        id: updatedBookmark.id,
+                        title: updatedBookmark.title,
+                        wasUpdating: true,
+                      },
+                    )
+                  } else {
+                    console.log(
+                      '⚡ Realtime UPDATE from external source (extension, etc):',
+                      {
+                        id: updatedBookmark.id,
+                        title: updatedBookmark.title,
+                        oldTitle: existingBookmark.title,
+                        wasUpdating: false,
+                      },
+                    )
+                  }
+
+                  console.log('✅ Applying bookmark update from realtime')
+                  return prev.map((bookmark) =>
+                    bookmark.id === updatedBookmark.id
+                      ? updatedBookmark
+                      : bookmark,
+                  )
+                })
+              } else {
+                console.warn(
+                  '❓ Unknown realtime event type:',
+                  (payload as any).eventType,
+                )
+              }
+            } catch (error) {
+              console.error(
+                '💥 Error processing realtime bookmark change:',
+                error,
+                payload,
               )
             }
           },
         )
-        .subscribe((status) => {
-          console.log('Bookmark realtime subscription status:', status)
+        .subscribe((status, err) => {
+          console.log(
+            `📡 Bookmark realtime subscription status: ${status} (attempt ${reconnectAttempts + 1})`,
+          )
+
+          if (status === 'SUBSCRIBED') {
+            console.log(
+              '✅ Bookmark realtime connected successfully for channel:',
+              channelName,
+            )
+            // 接続成功時は再接続カウンターをリセット
+            reconnectAttempts = 0
+            setError(null) // 接続成功時はエラーをクリア
+          } else if (status === 'CHANNEL_ERROR') {
+            const errorMessage = err
+              ? typeof err === 'string'
+                ? err
+                : JSON.stringify(err)
+              : 'Unknown error'
+            console.error('❌ Bookmark realtime channel error:', errorMessage)
+            console.error('📛 Error details:', {
+              error: err,
+              errorType: typeof err,
+              channelName,
+              reconnectAttempts,
+              maxAttempts: maxReconnectAttempts,
+            })
+
+            // 再接続を試行
+            if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
+              const retryDelay = Math.min(
+                1000 * Math.pow(2, reconnectAttempts),
+                30000,
+              ) // 指数バックオフ（最大30秒）
+              console.log(
+                `🔄 Scheduling reconnection in ${retryDelay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`,
+              )
+
+              reconnectTimeoutId = setTimeout(() => {
+                if (!isUnmounted) {
+                  reconnectAttempts++
+                  console.log('🔄 Attempting to reconnect...')
+                  channel.unsubscribe()
+                  setupRealtime()
+                }
+              }, retryDelay)
+            } else {
+              setError(
+                'リアルタイム接続でエラーが発生しました。ページを再読み込みしてください。',
+              )
+            }
+          } else if (status === 'TIMED_OUT') {
+            console.error('⏰ Bookmark realtime connection timed out')
+
+            // タイムアウト時も再接続を試行
+            if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
+              reconnectAttempts++
+              console.log(
+                `🔄 Reconnecting after timeout (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,
+              )
+              setupRealtime()
+            } else {
+              setError(
+                'リアルタイム接続がタイムアウトしました。ページを再読み込みしてください。',
+              )
+            }
+          } else if (status === 'CLOSED') {
+            console.warn(
+              '🔐 Bookmark realtime connection closed for channel:',
+              channelName,
+            )
+
+            // 予期しない切断時の再接続
+            if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
+              reconnectAttempts++
+              console.log(
+                `🔄 Reconnecting after unexpected closure (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,
+              )
+              const retryDelay = Math.min(
+                1000 * Math.pow(2, reconnectAttempts),
+                10000,
+              )
+              reconnectTimeoutId = setTimeout(() => {
+                if (!isUnmounted) {
+                  setupRealtime()
+                }
+              }, retryDelay)
+            }
+          } else if (status === 'CONNECTING') {
+            console.log(
+              '🔄 Connecting to bookmark realtime for channel:',
+              channelName,
+            )
+          } else {
+            console.log(
+              '📊 Bookmark realtime status:',
+              status,
+              'for channel:',
+              channelName,
+            )
+          }
+
+          if (err) {
+            console.error('📛 Bookmark realtime error details:', {
+              error: err,
+              errorType: typeof err,
+              errorMessage: err
+                ? typeof err === 'string'
+                  ? err
+                  : err.toString()
+                : 'undefined',
+              status,
+              channelName,
+            })
+          }
         })
 
       return () => {
-        console.log('Unsubscribing from bookmark realtime channel')
+        console.log(
+          '🔌 Unsubscribing from bookmark realtime channel:',
+          channelName,
+        )
         channel.unsubscribe()
       }
     }
 
-    const cleanup = setupRealtime()
-    return cleanup
+    // 初回接続
+    const initialCleanup = setupRealtime()
+
+    // useEffect全体のクリーンアップ関数
+    return () => {
+      console.log('🧹 Cleaning up bookmark realtime connection')
+      isUnmounted = true
+
+      // 保留中の再接続タイマーをクリア
+      if (reconnectTimeoutId) {
+        clearTimeout(reconnectTimeoutId)
+        reconnectTimeoutId = null
+      }
+
+      // チャンネルのクリーンアップ
+      initialCleanup()
+    }
   }, [user]) // userが変わったときに再設定
 
   const createBookmark = useCallback(
     async (data: { url: string; title?: string; description?: string }) => {
-      // 1. 一時IDでtemp entryを即座に作成（真の楽観的更新）
-      const tempId = `temp-${crypto.randomUUID()}`
+      // 1. 有効なUUIDで一時entryを即座に作成（真の楽観的更新）
+      const tempId = crypto.randomUUID() // temp-プレフィックスを削除
       const tempBookmark: Bookmark & { isLoading?: boolean } = {
         id: tempId,
         url: data.url,
         canonical_url: data.url, // 一時的：APIレスポンスで正式な値に置換
-        title: data.title || null, // スケルトンUI用にnullに変更
+        title: data.title || null, // スケルトンUI用のnullに変更
         description: data.description || null,
         memo: null,
         thumbnail_url: null,
@@ -144,7 +608,12 @@ export function useBookmarks(filters?: BookmarkFilters) {
       }
 
       // 2. 即座にUI更新（楽観的更新）
-      setBookmarks((prev) => [tempBookmark, ...prev])
+      console.log('🚀 Creating optimistic bookmark:', {
+        tempId,
+        url: data.url,
+        title: data.title,
+      })
+      setAllBookmarks((prev) => [tempBookmark, ...prev])
       setError(null)
 
       try {
@@ -165,17 +634,34 @@ export function useBookmarks(filters?: BookmarkFilters) {
         const result = await response.json()
         const savedBookmark = result.data
 
+        console.log('✅ API bookmark creation successful:', {
+          tempId,
+          savedId: savedBookmark.id,
+          url: savedBookmark.canonical_url,
+        })
+
         // 4. tempを正式なブックマークに置換
-        setBookmarks((prev) =>
-          prev.map((bookmark) =>
-            bookmark.id === tempId ? savedBookmark : bookmark,
-          ),
-        )
+        // 注意：Realtimeイベントが先に到着する可能性があるため、tempIdが存在するかチェック
+        setAllBookmarks((prev) => {
+          const tempStillExists = prev.some((b) => b.id === tempId)
+          if (tempStillExists) {
+            console.log('🔄 Replacing temp bookmark with API result')
+            return prev.map((bookmark) =>
+              bookmark.id === tempId ? savedBookmark : bookmark,
+            )
+          } else {
+            console.log(
+              '⚡ Temp bookmark already replaced by realtime, keeping current state',
+            )
+            return prev
+          }
+        })
 
         return savedBookmark
       } catch (err) {
         // 5. エラー時はtempを削除（rollback）
-        setBookmarks((prev) =>
+        console.error('❌ Bookmark creation failed, rolling back:', err)
+        setAllBookmarks((prev) =>
           prev.filter((bookmark) => bookmark.id !== tempId),
         )
         setError(
@@ -193,17 +679,35 @@ export function useBookmarks(filters?: BookmarkFilters) {
     async (id: string, updates: Partial<Bookmark>) => {
       // 1. 現在の状態をref経由で取得（stale closure回避）
       const previousBookmarks = bookmarksRef.current
+      const targetBookmark = previousBookmarks.find((b) => b.id === id)
 
-      // 2. 楽観的更新：即座にローカル状態を更新
-      setBookmarks((prev) =>
+      if (!targetBookmark) {
+        console.warn('⚠️ Attempting to update non-existent bookmark:', id)
+        throw new Error('更新対象のブックマークが見つかりません')
+      }
+
+      console.log('📝 Starting optimistic bookmark update:', {
+        id,
+        updates,
+        currentTitle: targetBookmark.title,
+        currentBookmarksCount: previousBookmarks.length,
+      })
+
+      // 2. 楽観的更新：isUpdatingフラグを付けて即座にローカル状態を更新
+      setAllBookmarks((prev) =>
         prev.map((bookmark) =>
-          bookmark.id === id ? { ...bookmark, ...updates } : bookmark,
+          bookmark.id === id
+            ? ({ ...bookmark, ...updates, isUpdating: true } as Bookmark & {
+                isUpdating?: boolean
+              })
+            : bookmark,
         ),
       )
       setError(null)
 
       try {
         // 3. API呼び出し
+        console.log('📡 Sending PATCH request to API for bookmark:', id)
         const response = await fetch(`/api/bookmarks/${id}`, {
           method: 'PATCH',
           headers: {
@@ -220,25 +724,102 @@ export function useBookmarks(filters?: BookmarkFilters) {
         const result = await response.json()
         const updatedBookmark = result.data
 
-        // 4. サーバーからの正式な結果で状態を更新
-        setBookmarks((prev) =>
-          prev.map((bookmark) =>
-            bookmark.id === id ? updatedBookmark : bookmark,
-          ),
-        )
+        console.log('✅ API bookmark update successful:', {
+          id,
+          updatedTitle: updatedBookmark.title,
+          updatedFields: Object.keys(updates),
+        })
 
-        // fetchBookmarks()呼び出し削除：楽観的更新で完結
+        // 4. サーバーからの正式な結果で状態を更新（isUpdatingフラグ削除）
+        // 注意：Realtimeイベントが先に到着する可能性があるため、isUpdatingが存在するかチェック
+        setAllBookmarks((prev) => {
+          const currentBookmark = prev.find((b) => b.id === id)
+          const isStillUpdating =
+            currentBookmark &&
+            (currentBookmark as Bookmark & { isUpdating?: boolean })
+              .isUpdating === true
+
+          if (isStillUpdating) {
+            console.log('🔄 Replacing optimistic update with API result')
+            return prev.map((bookmark) =>
+              bookmark.id === id ? updatedBookmark : bookmark,
+            )
+          } else {
+            console.log(
+              '⚡ Optimistic update already replaced by realtime, keeping current state',
+            )
+            return prev
+          }
+        })
+
+        console.log('⏳ Waiting for Realtime UPDATE event to confirm update...')
+
+        // 更新確認のタイムアウトを設定（5秒）
+        setTimeout(() => {
+          const currentBookmarks = bookmarksRef.current
+          const currentBookmark = currentBookmarks.find((b) => b.id === id)
+          const isStillUpdating =
+            currentBookmark &&
+            (currentBookmark as Bookmark & { isUpdating?: boolean })
+              .isUpdating === true
+
+          if (isStillUpdating) {
+            console.warn(
+              '⚠️ Realtime UPDATE event not received after 5 seconds, forcing local update',
+            )
+            setAllBookmarks((prev) =>
+              prev.map((bookmark) =>
+                bookmark.id === id ? updatedBookmark : bookmark,
+              ),
+            )
+          }
+        }, 5000)
 
         return updatedBookmark
       } catch (err) {
         // 5. エラー時は完全復旧
-        setBookmarks(previousBookmarks)
-        setError(
+        console.error('❌ Bookmark update failed, rolling back:', {
+          id,
+          error: err,
+          updates,
+        })
+
+        // Realtimeで既に更新されている可能性をチェック
+        const currentBookmarks = bookmarksRef.current
+        const currentBookmark = currentBookmarks.find((b) => b.id === id)
+        const isStillUpdating =
+          currentBookmark &&
+          (currentBookmark as Bookmark & { isUpdating?: boolean })
+            .isUpdating === true
+
+        if (!isStillUpdating) {
+          console.log(
+            '⚡ Bookmark already updated by realtime, not rolling back',
+          )
+          // Realtimeで既に更新済みの場合は、エラーを記録するが復旧しない
+          console.warn(
+            '📊 Concurrent update detected - API failed but realtime succeeded',
+          )
+        } else {
+          console.log(
+            '🔄 Rolling back optimistic update (removing isUpdating flag)',
+          )
+          // isUpdatingフラグを削除して元の状態に戻す
+          setAllBookmarks((prev) =>
+            prev.map((bookmark) =>
+              bookmark.id === id
+                ? { ...targetBookmark } // 元のブックマークに復旧
+                : bookmark,
+            ),
+          )
+        }
+
+        const errorMessage =
           err instanceof Error
             ? err.message
-            : 'ブックマークの更新に失敗しました',
-        )
-        throw err
+            : 'ブックマークの更新に失敗しました'
+        setError(errorMessage)
+        throw new Error(errorMessage)
       }
     },
     [],
@@ -247,13 +828,37 @@ export function useBookmarks(filters?: BookmarkFilters) {
   const deleteBookmark = useCallback(async (id: string) => {
     // 1. 現在の状態をref経由で取得（stale closure回避）
     const previousBookmarks = bookmarksRef.current
+    const targetBookmark = previousBookmarks.find((b) => b.id === id)
 
-    // 2. 即座に削除（楽観的更新）
-    setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+    if (!targetBookmark) {
+      console.warn('⚠️ Attempting to delete non-existent bookmark:', id)
+      throw new Error('削除対象のブックマークが見つかりません')
+    }
+
+    console.log('🗑️ Starting optimistic bookmark deletion:', {
+      id,
+      title: targetBookmark.title,
+      url: targetBookmark.canonical_url || targetBookmark.url,
+      currentBookmarksCount: previousBookmarks.length,
+    })
+
+    // 2. 楽観的削除：isDeleteingフラグを付けるだけで実際の削除はRealtimeで行う
+    setAllBookmarks((prev) => {
+      const updated = prev.map((bookmark) =>
+        bookmark.id === id
+          ? ({ ...bookmark, isDeleting: true } as Bookmark & {
+              isDeleting?: boolean
+            })
+          : bookmark,
+      )
+      console.log('🏷️ Added isDeleting flag to bookmark:', id)
+      return updated
+    })
     setError(null)
 
     try {
       // 3. API呼び出し
+      console.log('📡 Sending DELETE request to API for bookmark:', id)
       const response = await fetch(`/api/bookmarks/${id}`, {
         method: 'DELETE',
       })
@@ -263,24 +868,66 @@ export function useBookmarks(filters?: BookmarkFilters) {
         throw new Error(result.error || 'ブックマークの削除に失敗しました')
       }
 
-      // fetchBookmarks()呼び出し削除：楽観的更新で完結
+      console.log('✅ API bookmark deletion successful:', id)
+      console.log('⏳ Waiting for Realtime DELETE event to confirm deletion...')
+
+      // 削除確認のタイムアウトを設定（5秒に戻す）
+      setTimeout(() => {
+        const currentBookmarks = bookmarksRef.current
+        const stillExists = currentBookmarks.some((b) => b.id === id)
+        if (stillExists) {
+          console.warn(
+            '⚠️ Realtime DELETE event not received after 5 seconds, forcing local deletion',
+          )
+          setAllBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+        }
+      }, 5000)
     } catch (err) {
       // 4. エラー時は完全復旧
-      setBookmarks(previousBookmarks)
-      setError(
-        err instanceof Error ? err.message : 'ブックマークの削除に失敗しました',
-      )
-      throw err
+      console.error('❌ Bookmark deletion failed, rolling back:', {
+        id,
+        error: err,
+      })
+
+      // Realtimeで既に削除されている可能性をチェック
+      const currentBookmarks = bookmarksRef.current
+      const stillExists = currentBookmarks.some((b) => b.id === id)
+
+      if (!stillExists) {
+        console.log('⚡ Bookmark already deleted by realtime, not rolling back')
+        // Realtimeで既に削除済みの場合は、エラーを記録するが復旧しない
+        console.warn(
+          '📊 Concurrent deletion detected - API failed but realtime succeeded',
+        )
+      } else {
+        console.log(
+          '🔄 Rolling back optimistic deletion (removing isDeleting flag)',
+        )
+        // isDeleteingフラグを削除して元の状態に戻す
+        setAllBookmarks((prev) =>
+          prev.map((bookmark) =>
+            bookmark.id === id
+              ? { ...targetBookmark } // 元のブックマークに復旧
+              : bookmark,
+          ),
+        )
+      }
+
+      const errorMessage =
+        err instanceof Error ? err.message : 'ブックマークの削除に失敗しました'
+      setError(errorMessage)
+      throw new Error(errorMessage)
     }
   }, [])
 
   return {
     bookmarks,
+    allBookmarks,
     loading,
     error,
     createBookmark,
     updateBookmark,
     deleteBookmark,
-    refetch: fetchBookmarks, // 手動リフレッシュが必要な場合
+    refetch: fetchAllBookmarks, // 手動リフレッシュが必要な場合
   }
 }

@@ -1,50 +1,42 @@
 'use client'
 
-import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import TagsTree from '@/components/tags/tags-tree'
-import TagForm from '@/components/tags/tag-form'
+import { useState } from 'react'
+import Header, { type NavItem } from '@/components/layout/header'
 import TagEditForm from '@/components/tags/tag-edit-form'
-import SignOutButton from '@/components/common/sign-out-button'
-import { useTags, type TagRow } from '@/hooks/use-tags'
+import TagForm from '@/components/tags/tag-form'
+import TagsList from '@/components/tags/tags-tree'
+import { type TagRow, useTags } from '@/hooks/use-tags'
 
 export default function TagsPage() {
-  const { tags, tagsTree, loading: isLoading, error } = useTags()
+  const {
+    tags,
+    loading: isLoading,
+    error,
+    createTag,
+    updateTag,
+    deleteTag,
+    reorderTags,
+  } = useTags()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingTag, setEditingTag] = useState<TagRow | null>(null)
-  const [selectedParentId, setSelectedParentId] = useState<string | undefined>(
-    undefined,
-  )
   const [selectedTagId, setSelectedTagId] = useState<string | undefined>(
     undefined,
   )
-  const [user, setUser] = useState<{ email?: string } | null>(null)
-
-  useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const userResponse = await fetch('/api/auth/user')
-        if (userResponse.ok) {
-          const userData = await userResponse.json()
-          setUser(userData.user)
-        }
-      } catch (err) {
-        console.error('Error fetching user data:', err)
-      }
-    }
-
-    fetchUserData()
-  }, [])
+  const navItems: NavItem[] = [
+    { href: '/dashboard', label: 'ダッシュボード' },
+    { href: '/bookmarks', label: 'ブックマーク' },
+    { href: '/tags', label: 'タグ', isActive: true },
+  ]
 
   const handleCreateTag = () => {
-    setSelectedParentId(selectedTagId)
     setShowCreateModal(true)
   }
 
-  const handleTagCreated = () => {
+  const handleTagCreated = async () => {
+    // 楽観的更新が反映されるまで少し待機
+    await new Promise((resolve) => setTimeout(resolve, 100))
     setShowCreateModal(false)
-    setSelectedParentId(undefined)
   }
 
   const handleTagSelect = (tagId: string) => {
@@ -72,45 +64,7 @@ export default function TagsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="px-4 sm:px-6 lg:px-8 xl:px-12">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <Link
-                  href="/dashboard"
-                  className="text-xl font-bold text-gray-900 hover:text-gray-700"
-                >
-                  Encore
-                </Link>
-              </div>
-              <div className="hidden sm:ml-6 sm:flex sm:items-center">
-                <nav className="flex space-x-8">
-                  <Link
-                    href="/dashboard"
-                    className="text-gray-500 hover:text-gray-700 px-3 py-2 text-sm font-medium"
-                  >
-                    ダッシュボード
-                  </Link>
-                  <Link
-                    href="/bookmarks"
-                    className="text-gray-500 hover:text-gray-700 px-3 py-2 text-sm font-medium"
-                  >
-                    ブックマーク
-                  </Link>
-                  <span className="text-blue-600 px-3 py-2 text-sm font-medium">
-                    タグ
-                  </span>
-                </nav>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-700">{user?.email}</span>
-              <SignOutButton />
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Header navItems={navItems} />
 
       <main>
         <div className="py-6 px-4 sm:px-6 lg:px-8 xl:px-12">
@@ -119,7 +73,7 @@ export default function TagsPage() {
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">タグ管理</h1>
                 <p className="mt-1 text-sm text-gray-600">
-                  階層タグの作成・編集・整理を行います
+                  タグの作成・編集・整理を行います
                 </p>
               </div>
               <div className="flex space-x-3">
@@ -218,10 +172,15 @@ export default function TagsPage() {
                       </div>
                     </div>
                   ) : (
-                    <TagsTree
+                    <TagsList
+                      tags={tags}
+                      loading={isLoading}
+                      error={error}
                       onTagSelect={handleTagSelect}
                       selectedTagId={selectedTagId}
                       onTagEdit={handleTagEdit}
+                      deleteTag={deleteTag}
+                      reorderTags={reorderTags}
                     />
                   )}
                 </div>
@@ -285,15 +244,6 @@ export default function TagsPage() {
                         </label>
                         <p className="mt-1 text-2xl font-semibold text-gray-900">
                           {tags.length}
-                        </p>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">
-                          ルートタグ数
-                        </label>
-                        <p className="mt-1 text-2xl font-semibold text-gray-900">
-                          {tagsTree.length}
                         </p>
                       </div>
 
@@ -365,9 +315,10 @@ export default function TagsPage() {
             </div>
             <div className="p-6">
               <TagForm
-                parentTagId={selectedParentId}
                 onSuccess={handleTagCreated}
                 onCancel={() => setShowCreateModal(false)}
+                createTag={createTag}
+                updateTag={updateTag}
               />
             </div>
           </div>
@@ -380,6 +331,7 @@ export default function TagsPage() {
           tag={editingTag}
           onSuccess={handleTagUpdated}
           onClose={handleEditModalClose}
+          updateTag={updateTag}
         />
       )}
     </div>

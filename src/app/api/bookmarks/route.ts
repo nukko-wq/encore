@@ -40,8 +40,20 @@ export async function GET(request: NextRequest) {
       filters.is_pinned = isPinned === 'true'
     }
 
-    // ブックマーク取得
-    const result = await bookmarkService.getBookmarks(filters)
+    // タグフィルタ
+    const tag = searchParams.get('tag')
+    if (tag) {
+      filters.tags = tag
+    }
+
+    // 検索フィルタ
+    const search = searchParams.get('search')
+    if (search) {
+      filters.search = search
+    }
+
+    // ブックマーク取得（タグ情報付き）
+    const result = await bookmarkService.getBookmarksWithTags(filters)
 
     return NextResponse.json({
       data: result.bookmarks,

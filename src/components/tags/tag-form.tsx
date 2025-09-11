@@ -1,13 +1,18 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { useTags, type TagRow } from '@/hooks/use-tags'
+import { useCallback, useState } from 'react'
+import { type TagRow } from '@/hooks/use-tags'
 
 interface TagFormProps {
-  parentTagId?: string
   editingTag?: TagRow | null
   onSuccess?: () => void
   onCancel?: () => void
+  createTag: (data: {
+    name: string
+    color?: string
+    display_order?: number
+  }) => Promise<TagRow>
+  updateTag: (id: string, updates: Partial<TagRow>) => Promise<TagRow>
 }
 
 const COLOR_PRESETS = [
@@ -24,12 +29,12 @@ const COLOR_PRESETS = [
 ]
 
 export default function TagForm({
-  parentTagId,
   editingTag,
   onSuccess,
   onCancel,
+  createTag,
+  updateTag,
 }: TagFormProps) {
-  const { createTag, updateTag } = useTags()
   const [name, setName] = useState(editingTag?.name || '')
   const [color, setColor] = useState(editingTag?.color || COLOR_PRESETS[0])
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -55,7 +60,6 @@ export default function TagForm({
           await createTag({
             name: name.trim(),
             color,
-            parent_tag_id: parentTagId ?? null,
             display_order: 0,
           })
         }
@@ -63,7 +67,13 @@ export default function TagForm({
         // フォームリセット
         setName('')
         setColor(COLOR_PRESETS[0])
-        onSuccess?.()
+
+        // 楽観的更新の完了を確実にするため、onSuccessを最後に呼び出し
+        if (onSuccess) {
+          // React の状態更新を確実に反映させるために次のティックで実行
+          await new Promise((resolve) => setTimeout(resolve, 0))
+          onSuccess()
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : 'タグの保存に失敗しました',
@@ -72,7 +82,7 @@ export default function TagForm({
         setIsSubmitting(false)
       }
     },
-    [name, color, editingTag, updateTag, createTag, parentTagId, onSuccess],
+    [name, color, editingTag, updateTag, createTag, onSuccess],
   )
 
   const handleCancel = useCallback(() => {

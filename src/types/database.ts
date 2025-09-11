@@ -18,6 +18,14 @@ export interface Bookmark {
   pinned_at: string | null
   created_at: string
   updated_at: string
+  bookmark_tags?: Array<{
+    tag_id: string
+    tag: {
+      id: string
+      name: string
+      color: string
+    }
+  }>
 }
 
 export interface AllowedEmail {
@@ -60,7 +68,7 @@ export interface UpdateBookmarkData {
 // フィルタリング用の型
 export interface BookmarkFilters {
   status?: BookmarkStatus | BookmarkStatus[]
-  tags?: string[]
+  tags?: string
   is_favorite?: boolean
   is_pinned?: boolean
   search?: string
@@ -171,6 +179,5 @@ export interface BookmarkWithTags extends Bookmark {
     id: string
     name: string
     color: string
-    parent_tag_id: string | null
   }[]
 }
