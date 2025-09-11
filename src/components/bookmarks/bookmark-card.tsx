@@ -34,7 +34,7 @@ export default function BookmarkCard({
 
   // スケルトンUI判定: 一時ブックマークまたはローディング中の場合
   const isLoadingBookmark =
-    bookmark.id.startsWith('temp-') || (bookmark as any).isLoading
+    bookmark.id.startsWith('temp-') || (bookmark as Bookmark & { isLoading?: boolean }).isLoading
 
   const handleDelete = () => {
     onDelete(bookmark)
