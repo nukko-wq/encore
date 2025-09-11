@@ -1,68 +1,76 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '@/components/common/auth-provider'
 import { supabase } from '@/lib/supabase'
 import type { Bookmark, BookmarkFilters } from '@/types/database'
 
 export function useBookmarks(filters?: BookmarkFilters) {
   const { user } = useAuth()
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [allBookmarks, setAllBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // クライアントサイドフィルタリング
+  const bookmarks = useMemo(() => {
+    if (!allBookmarks) return []
+    
+    return allBookmarks.filter(bookmark => {
+      // タグフィルタリング
+      if (filters?.tags) {
+        const hasTag = bookmark.bookmark_tags?.some(
+          tagRelation => tagRelation.tag_id === filters.tags
+        )
+        if (!hasTag) return false
+      }
+      
+      // ステータスフィルタリング
+      if (filters?.status) {
+        if (Array.isArray(filters.status)) {
+          if (!filters.status.includes(bookmark.status)) return false
+        } else {
+          if (bookmark.status !== filters.status) return false
+        }
+      }
+      
+      // お気に入りフィルタリング
+      if (filters?.is_favorite !== undefined) {
+        if (bookmark.is_favorite !== filters.is_favorite) return false
+      }
+      
+      // ピン留めフィルタリング
+      if (filters?.is_pinned !== undefined) {
+        if (bookmark.is_pinned !== filters.is_pinned) return false
+      }
+      
+      // 検索フィルタリング
+      if (filters?.search) {
+        const searchTerm = filters.search.toLowerCase()
+        const titleMatch = bookmark.title?.toLowerCase().includes(searchTerm)
+        const descriptionMatch = bookmark.description?.toLowerCase().includes(searchTerm)
+        const memoMatch = bookmark.memo?.toLowerCase().includes(searchTerm)
+        
+        if (!titleMatch && !descriptionMatch && !memoMatch) return false
+      }
+      
+      return true
+    })
+  }, [allBookmarks, filters])
 
   // stale closure対策：常に最新のbookmarks状態をrefで保持
   const bookmarksRef = useRef(bookmarks)
   bookmarksRef.current = bookmarks
 
-  // 全ブックマーク取得関数（フィルターなし）
+  // 全ブックマーク取得関数
   const fetchAllBookmarks = useCallback(async () => {
     try {
-      const url = '/api/bookmarks'
-      const response = await fetch(url)
-
-      if (!response.ok) {
-        throw new Error('全ブックマークの取得に失敗しました')
-      }
-      const result = await response.json()
-      setAllBookmarks(result.data || [])
-    } catch (err) {
-      console.error('Error fetching all bookmarks:', err)
-    }
-  }, [])
-
-  // ブックマーク取得関数（useCallbackで依存関係を管理）
-  const fetchBookmarks = useCallback(async () => {
-    try {
       setLoading(true)
-
-      // URLパラメータ構築
-      const params = new URLSearchParams()
-      if (filters?.status) {
-        if (Array.isArray(filters.status)) {
-          for (const status of filters.status) {
-            params.append('status', status)
-          }
-        } else {
-          params.append('status', filters.status)
-        }
-      }
-      if (filters?.is_favorite !== undefined)
-        params.append('is_favorite', String(filters.is_favorite))
-      if (filters?.is_pinned !== undefined)
-        params.append('is_pinned', String(filters.is_pinned))
-      if (filters?.search) params.append('search', filters.search)
-      if (filters?.tags) {
-        params.append('tag', filters.tags)
-      }
-
-      const url = `/api/bookmarks${params.toString() ? `?${params.toString()}` : ''}`
+      const url = '/api/bookmarks'
       const response = await fetch(url)
 
       if (!response.ok) {
         throw new Error('ブックマークの取得に失敗しました')
       }
       const result = await response.json()
-      setBookmarks(result.data || [])
+      setAllBookmarks(result.data || [])
       setError(null)
     } catch (err) {
       console.error('Error fetching bookmarks:', err)
@@ -72,12 +80,12 @@ export function useBookmarks(filters?: BookmarkFilters) {
     } finally {
       setLoading(false)
     }
-  }, [filters])
+  }, [])
 
   // 初回データ取得
   useEffect(() => {
-    Promise.all([fetchBookmarks(), fetchAllBookmarks()])
-  }, [fetchBookmarks, fetchAllBookmarks])
+    fetchAllBookmarks()
+  }, [fetchAllBookmarks])
 
   // Supabase Realtimeでリアルタイム更新（フィルターなし、クライアント側で処理）
   useEffect(() => {
@@ -137,7 +145,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
                     "🔍 Checking if deleted bookmark exists in current user's bookmarks",
                   )
 
-                  setBookmarks((prev) => {
+                  setAllBookmarks((prev) => {
                     const targetBookmark = prev.find((b) => b.id === deletedId)
 
                     if (!targetBookmark) {
@@ -201,7 +209,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
                 }
 
                 console.log('✅ DELETE event for current user, processing...')
-                setBookmarks((prev) => {
+                setAllBookmarks((prev) => {
                   const targetBookmark = prev.find((b) => b.id === deletedId)
 
                   if (!targetBookmark) {
@@ -261,7 +269,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
                       '🔍 Checking if this INSERT is for current user by other means',
                     )
                     // 楽観的更新との照合で判定
-                    setBookmarks((prev) => {
+                    setAllBookmarks((prev) => {
                       const existingTempBookmark = prev.find((b) => {
                         const isTemporary = (b as any).isLoading === true
                         const urlMatch =
@@ -319,7 +327,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
                   '➕ Processing INSERT event for bookmark:',
                   newBookmark.id,
                 )
-                setBookmarks((prev) => {
+                setAllBookmarks((prev) => {
                   // 改善された重複チェックロジック
                   // 1. IDベースでの重複チェック（一時ブックマークは除外）
                   const existsById = prev.some((b) => {
@@ -372,7 +380,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
                   '📝 Processing UPDATE event for bookmark:',
                   updatedBookmark.id,
                 )
-                setBookmarks((prev) => {
+                setAllBookmarks((prev) => {
                   const existingBookmark = prev.find(
                     (b) => b.id === updatedBookmark.id,
                   )
@@ -605,7 +613,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
         url: data.url,
         title: data.title,
       })
-      setBookmarks((prev) => [tempBookmark, ...prev])
+      setAllBookmarks((prev) => [tempBookmark, ...prev])
       setError(null)
 
       try {
@@ -634,7 +642,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
         // 4. tempを正式なブックマークに置換
         // 注意：Realtimeイベントが先に到着する可能性があるため、tempIdが存在するかチェック
-        setBookmarks((prev) => {
+        setAllBookmarks((prev) => {
           const tempStillExists = prev.some((b) => b.id === tempId)
           if (tempStillExists) {
             console.log('🔄 Replacing temp bookmark with API result')
@@ -653,7 +661,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
       } catch (err) {
         // 5. エラー時はtempを削除（rollback）
         console.error('❌ Bookmark creation failed, rolling back:', err)
-        setBookmarks((prev) =>
+        setAllBookmarks((prev) =>
           prev.filter((bookmark) => bookmark.id !== tempId),
         )
         setError(
@@ -686,7 +694,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
       })
 
       // 2. 楽観的更新：isUpdatingフラグを付けて即座にローカル状態を更新
-      setBookmarks((prev) =>
+      setAllBookmarks((prev) =>
         prev.map((bookmark) =>
           bookmark.id === id
             ? ({ ...bookmark, ...updates, isUpdating: true } as Bookmark & {
@@ -724,7 +732,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
         // 4. サーバーからの正式な結果で状態を更新（isUpdatingフラグ削除）
         // 注意：Realtimeイベントが先に到着する可能性があるため、isUpdatingが存在するかチェック
-        setBookmarks((prev) => {
+        setAllBookmarks((prev) => {
           const currentBookmark = prev.find((b) => b.id === id)
           const isStillUpdating =
             currentBookmark &&
@@ -759,7 +767,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
             console.warn(
               '⚠️ Realtime UPDATE event not received after 5 seconds, forcing local update',
             )
-            setBookmarks((prev) =>
+            setAllBookmarks((prev) =>
               prev.map((bookmark) =>
                 bookmark.id === id ? updatedBookmark : bookmark,
               ),
@@ -797,7 +805,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
             '🔄 Rolling back optimistic update (removing isUpdating flag)',
           )
           // isUpdatingフラグを削除して元の状態に戻す
-          setBookmarks((prev) =>
+          setAllBookmarks((prev) =>
             prev.map((bookmark) =>
               bookmark.id === id
                 ? { ...targetBookmark } // 元のブックマークに復旧
@@ -835,7 +843,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
     })
 
     // 2. 楽観的削除：isDeleteingフラグを付けるだけで実際の削除はRealtimeで行う
-    setBookmarks((prev) => {
+    setAllBookmarks((prev) => {
       const updated = prev.map((bookmark) =>
         bookmark.id === id
           ? ({ ...bookmark, isDeleting: true } as Bookmark & {
@@ -871,7 +879,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
           console.warn(
             '⚠️ Realtime DELETE event not received after 5 seconds, forcing local deletion',
           )
-          setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+          setAllBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
         }
       }, 5000)
     } catch (err) {
@@ -896,7 +904,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
           '🔄 Rolling back optimistic deletion (removing isDeleting flag)',
         )
         // isDeleteingフラグを削除して元の状態に戻す
-        setBookmarks((prev) =>
+        setAllBookmarks((prev) =>
           prev.map((bookmark) =>
             bookmark.id === id
               ? { ...targetBookmark } // 元のブックマークに復旧
@@ -920,6 +928,6 @@ export function useBookmarks(filters?: BookmarkFilters) {
     createBookmark,
     updateBookmark,
     deleteBookmark,
-    refetch: fetchBookmarks, // 手動リフレッシュが必要な場合
+    refetch: fetchAllBookmarks, // 手動リフレッシュが必要な場合
   }
 }
