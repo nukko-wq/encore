@@ -159,6 +159,30 @@ export interface CreateLinkPreviewData {
   retry_count?: number
 }
 
+// タグの型定義
+export interface Tag {
+  id: string
+  user_id: string
+  name: string
+  color: string
+  display_order: number
+  created_at: string
+}
+
+// タグ作成用の型
+export interface CreateTagData {
+  name: string
+  color?: string
+  display_order?: number
+}
+
+// タグ更新用の型
+export interface UpdateTagData {
+  name?: string
+  color?: string
+  display_order?: number
+}
+
 // ブックマーク-タグ関連の型定義
 export interface BookmarkTag {
   id: string

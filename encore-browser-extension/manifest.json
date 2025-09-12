@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Encore Bookmark Extension",
+  "version": "1.0.0",
+  "description": "Save bookmarks to your Encore collection with tags",
+  "author": "Encore Team",
+
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "cookies",
+    "contextMenus"
+  ],
+
+  "host_permissions": ["http://localhost:3000/*", "https://*.encore.dev/*"],
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Save to Encore",
+    "default_icon": {
+      "16": "assets/icons/icon-16.svg",
+      "48": "assets/icons/icon-48.svg",
+      "128": "assets/icons/icon-128.svg"
+    }
+  },
+
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-scripts/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "commands": {
+    "save-bookmark": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+B"
+      },
+      "description": "Save current page to Encore"
+    }
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/images/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "icons": {
+    "16": "assets/icons/icon-16.svg",
+    "48": "assets/icons/icon-48.svg",
+    "128": "assets/icons/icon-128.svg"
+  }
+}

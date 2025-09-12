@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Encore Bookmark</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- ヘッダー -->
+    <div class="header">
+      <div class="logo">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+        </svg>
+        <span class="title">Encore Bookmark</span>
+      </div>
+    </div>
+
+    <!-- ローディング状態 -->
+    <div id="loading-state" class="state-container">
+      <div class="loading-spinner"></div>
+      <p class="status-text">読み込み中...</p>
+    </div>
+
+    <!-- ログイン要求状態 -->
+    <div id="login-required-state" class="state-container hidden">
+      <div class="login-prompt">
+        <svg class="login-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+        </svg>
+        <h3>ログインが必要です</h3>
+        <p>ブックマークを保存するには、Encoreにログインしてください。</p>
+        <button id="login-button" class="btn btn-primary">
+          ログインページを開く
+        </button>
+      </div>
+    </div>
+
+    <!-- ブックマーク保存状態 -->
+    <div id="bookmark-form-state" class="state-container hidden">
+      <!-- ページ情報表示 -->
+      <div class="page-info">
+        <div id="page-thumbnail" class="page-thumbnail">
+        </div>
+        <div class="page-details">
+          <h3 id="page-title" class="page-title">ページタイトル</h3>
+          <p id="page-url" class="page-url">https://example.com</p>
+        </div>
+      </div>
+
+      <!-- タグ選択 -->
+      <div class="tags-section">
+        <label class="section-label">タグ:</label>
+        
+        <!-- 選択済みタグ表示 -->
+        <div id="selected-tags" class="selected-tags"></div>
+        
+        <!-- 統合検索・作成インプット -->
+        <div class="tag-search-container">
+          <div class="search-input-wrapper">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input 
+              id="tag-search-input" 
+              type="text" 
+              placeholder="タグを検索または作成..."
+              class="tag-search-input"
+              maxlength="50"
+              autocomplete="off"
+            >
+            <div id="search-clear" class="search-clear hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </div>
+          </div>
+          
+          <!-- タグ候補ドロップダウン -->
+          <div id="tag-suggestions" class="tag-suggestions hidden">
+            <div id="matching-tags" class="suggestion-group">
+              <div class="suggestion-label">検索結果</div>
+              <div class="suggestion-list"></div>
+            </div>
+            <div id="frequent-tags" class="suggestion-group">
+              <div class="suggestion-label">よく使用するタグ</div>
+              <div class="suggestion-list"></div>
+            </div>
+            <div id="create-new-tag" class="suggestion-group hidden">
+              <div class="suggestion-item create-new">
+                <svg class="plus-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                <span class="create-text">「<span id="create-tag-name"></span>」を作成</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 保存ボタン -->
+      <div class="actions">
+        <button id="save-button" class="btn btn-primary btn-save">
+          <svg class="save-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+          </svg>
+          ブックマークを保存
+        </button>
+      </div>
+    </div>
+
+    <!-- 保存中状態 -->
+    <div id="saving-state" class="state-container hidden">
+      <div class="loading-spinner"></div>
+      <p class="status-text">保存中...</p>
+    </div>
+
+    <!-- 保存完了状態 -->
+    <div id="success-state" class="state-container hidden">
+      <div class="success-message">
+        <svg class="success-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <h3>保存完了!</h3>
+        <p>ブックマークが正常に保存されました。</p>
+        <button id="view-bookmarks-button" class="btn btn-secondary">
+          ブックマーク一覧を表示
+        </button>
+      </div>
+    </div>
+
+    <!-- エラー状態 -->
+    <div id="error-state" class="state-container hidden">
+      <div class="error-message">
+        <svg class="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="15" y1="9" x2="9" y2="15"/>
+          <line x1="9" y1="9" x2="15" y2="15"/>
+        </svg>
+        <h3>エラーが発生しました</h3>
+        <p id="error-message" class="error-text">保存に失敗しました。再度お試しください。</p>
+        <button id="retry-button" class="btn btn-primary">
+          再試行
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

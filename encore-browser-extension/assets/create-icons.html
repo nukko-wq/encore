@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Icon Generator</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        canvas { border: 1px solid #ccc; margin: 10px; }
+    </style>
+</head>
+<body>
+    <h2>Encore Extension Icon Generator</h2>
+    <p>基本的なアイコンを生成します。実際の製品版では適切なアイコンに置き換えてください。</p>
+    
+    <div id="icons"></div>
+    
+    <script>
+        // アイコンサイズの定義
+        const sizes = [16, 48, 128];
+        
+        sizes.forEach(size => {
+            // キャンバスを作成
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            canvas.id = `icon-${size}`;
+            
+            const ctx = canvas.getContext('2d');
+            
+            // 背景色（Encoreのブルー）
+            ctx.fillStyle = '#3B82F6';
+            ctx.fillRect(0, 0, size, size);
+            
+            // 角を丸くする
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.beginPath();
+            const radius = size * 0.15;
+            ctx.roundRect(0, 0, size, size, radius);
+            ctx.fill();
+            
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // ブックマークアイコン（白）
+            ctx.fillStyle = '#FFFFFF';
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = Math.max(1, size / 32);
+            
+            // ブックマークの形を描画
+            const margin = size * 0.2;
+            const bookmarkWidth = size - (margin * 2);
+            const bookmarkHeight = size - (margin * 1.5);
+            
+            ctx.beginPath();
+            ctx.moveTo(margin, margin);
+            ctx.lineTo(margin + bookmarkWidth, margin);
+            ctx.lineTo(margin + bookmarkWidth, margin + bookmarkHeight);
+            ctx.lineTo(margin + bookmarkWidth/2, margin + bookmarkHeight - size * 0.15);
+            ctx.lineTo(margin, margin + bookmarkHeight);
+            ctx.closePath();
+            ctx.fill();
+            
+            // キャンバスをページに追加
+            document.getElementById('icons').appendChild(canvas);
+            
+            // ダウンロードリンクを作成
+            canvas.toBlob(blob => {
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `icon-${size}.png`;
+                link.textContent = `Download ${size}x${size}`;
+                link.style.display = 'block';
+                link.style.marginBottom = '10px';
+                document.getElementById('icons').appendChild(link);
+            });
+        });
+        
+        // CanvasRenderingContext2D.roundRect polyfill for older browsers
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+                this.beginPath();
+                this.moveTo(x + radius, y);
+                this.lineTo(x + width - radius, y);
+                this.quadraticCurveTo(x + width, y, x + width, y + radius);
+                this.lineTo(x + width, y + height - radius);
+                this.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                this.lineTo(x + radius, y + height);
+                this.quadraticCurveTo(x, y + height, x, y + height - radius);
+                this.lineTo(x, y + radius);
+                this.quadraticCurveTo(x, y, x + radius, y);
+                this.closePath();
+            };
+        }
+    </script>
+</body>
+</html>
