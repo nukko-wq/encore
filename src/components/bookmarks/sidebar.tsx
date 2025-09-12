@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useTags, type TagRow } from '@/hooks/use-tags'
+import { type TagRow, useTags } from '@/hooks/use-tags'
 
 interface BookmarksSidebarProps {
   selectedTagId: string | null

@@ -80,7 +80,7 @@ export function useTags() {
       fetchTags()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isInitialized]) // fetchTagsを意図的に依存関係から除外
+  }, [user, isInitialized, fetchTags]) // fetchTagsを意図的に依存関係から除外
 
   const createTag = useCallback(
     async (data: { name: string; color?: string; display_order?: number }) => {

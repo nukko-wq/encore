@@ -12,16 +12,16 @@ export function useBookmarks(filters?: BookmarkFilters) {
   // クライアントサイドフィルタリング
   const bookmarks = useMemo(() => {
     if (!allBookmarks) return []
-    
-    return allBookmarks.filter(bookmark => {
+
+    return allBookmarks.filter((bookmark) => {
       // タグフィルタリング
       if (filters?.tags) {
         const hasTag = bookmark.bookmark_tags?.some(
-          tagRelation => tagRelation.tag_id === filters.tags
+          (tagRelation) => tagRelation.tag_id === filters.tags,
         )
         if (!hasTag) return false
       }
-      
+
       // ステータスフィルタリング
       if (filters?.status) {
         if (Array.isArray(filters.status)) {
@@ -30,27 +30,29 @@ export function useBookmarks(filters?: BookmarkFilters) {
           if (bookmark.status !== filters.status) return false
         }
       }
-      
+
       // お気に入りフィルタリング
       if (filters?.is_favorite !== undefined) {
         if (bookmark.is_favorite !== filters.is_favorite) return false
       }
-      
+
       // ピン留めフィルタリング
       if (filters?.is_pinned !== undefined) {
         if (bookmark.is_pinned !== filters.is_pinned) return false
       }
-      
+
       // 検索フィルタリング
       if (filters?.search) {
         const searchTerm = filters.search.toLowerCase()
         const titleMatch = bookmark.title?.toLowerCase().includes(searchTerm)
-        const descriptionMatch = bookmark.description?.toLowerCase().includes(searchTerm)
+        const descriptionMatch = bookmark.description
+          ?.toLowerCase()
+          .includes(searchTerm)
         const memoMatch = bookmark.memo?.toLowerCase().includes(searchTerm)
-        
+
         if (!titleMatch && !descriptionMatch && !memoMatch) return false
       }
-      
+
       return true
     })
   }, [allBookmarks, filters])
@@ -110,9 +112,8 @@ export function useBookmarks(filters?: BookmarkFilters) {
         currentChannel.unsubscribe()
       }
 
-      const channel = supabase
-        .channel(channelName)
-      
+      const channel = supabase.channel(channelName)
+
       // 現在のチャンネル参照を更新
       currentChannel = channel
         .on(
@@ -472,14 +473,17 @@ export function useBookmarks(filters?: BookmarkFilters) {
                   ? JSON.stringify(err)
                   : String(err)
               : 'Unknown error'
-            
+
             // 一般的でノイズとなる"Unknown error"は警告レベルでログ
             if (errorMessage === 'Unknown error') {
               console.debug('🔕 Realtime channel error (benign):', errorMessage)
             } else {
-              console.warn('⚠️ Realtime channel error (non-critical):', errorMessage)
+              console.warn(
+                '⚠️ Realtime channel error (non-critical):',
+                errorMessage,
+              )
             }
-            
+
             // CHANNEL_ERRORでは再接続しない（無限ループを防ぐため）
             // クライアントサイドフィルタリングがあるため基本機能は動作する
           } else if (status === 'TIMED_OUT') {
@@ -491,9 +495,9 @@ export function useBookmarks(filters?: BookmarkFilters) {
               console.log(
                 `🔄 Reconnecting after timeout (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,
               )
-              
+
               // 現在のチャンネルをクリーンアップしてから再接続
-              const retryDelay = Math.min(1000 * (2 ** reconnectAttempts), 10000)
+              const retryDelay = Math.min(1000 * 2 ** reconnectAttempts, 10000)
               reconnectTimeoutId = setTimeout(() => {
                 if (!isUnmounted) {
                   // setupRealtime内でクリーンアップされるため、ここでは不要
@@ -501,7 +505,9 @@ export function useBookmarks(filters?: BookmarkFilters) {
                 }
               }, retryDelay)
             } else {
-              console.warn('⚠️ Realtime connection failed after max attempts, continuing without realtime updates')
+              console.warn(
+                '⚠️ Realtime connection failed after max attempts, continuing without realtime updates',
+              )
             }
           } else if (status === 'CLOSED') {
             console.warn(
@@ -515,10 +521,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
               console.log(
                 `🔄 Reconnecting after unexpected closure (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,
               )
-              const retryDelay = Math.min(
-                1000 * (2 ** reconnectAttempts),
-                10000,
-              )
+              const retryDelay = Math.min(1000 * 2 ** reconnectAttempts, 10000)
               reconnectTimeoutId = setTimeout(() => {
                 if (!isUnmounted) {
                   // setupRealtime内でクリーンアップされるため、ここでは不要
@@ -526,7 +529,9 @@ export function useBookmarks(filters?: BookmarkFilters) {
                 }
               }, retryDelay)
             } else {
-              console.warn('⚠️ Realtime connection closed after max attempts, continuing without realtime updates')
+              console.warn(
+                '⚠️ Realtime connection closed after max attempts, continuing without realtime updates',
+              )
             }
           } else if (status === 'CONNECTING') {
             console.log(
@@ -549,7 +554,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
                 ? err
                 : String(err)
               : 'undefined'
-            
+
             // CHANNEL_ERROR以外の重要なエラーのみログ出力
             if (errorMessage !== 'Unknown error') {
               console.error('📛 Realtime error details:', {
@@ -589,7 +594,7 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
       // チャンネルのクリーンアップ
       initialCleanup()
-      
+
       // 現在のチャンネル参照もクリア
       if (currentChannel) {
         currentChannel.unsubscribe()
@@ -892,7 +897,9 @@ export function useBookmarks(filters?: BookmarkFilters) {
           console.warn(
             '⚠️ Realtime DELETE event not received after 5 seconds, forcing local deletion',
           )
-          setAllBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+          setAllBookmarks((prev) =>
+            prev.filter((bookmark) => bookmark.id !== id),
+          )
         }
       }, 5000)
     } catch (err) {
