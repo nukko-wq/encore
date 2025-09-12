@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { type TagRow } from '@/hooks/use-tags'
+import type { TagRow } from '@/hooks/use-tags'
 
 interface TagFormProps {
   editingTag?: TagRow | null

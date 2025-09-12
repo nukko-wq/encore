@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { type TagRow } from '@/hooks/use-tags'
+import type { TagRow } from '@/hooks/use-tags'
 import TagForm from './tag-form'
 
 interface TagEditFormProps {
@@ -36,7 +36,7 @@ export default function TagEditForm({
     } finally {
       setIsDeleting(false)
     }
-  }, [tag.id, onSuccess, showDeleteConfirm])
+  }, [onSuccess, showDeleteConfirm])
 
   const handleCancelDelete = useCallback(() => {
     setShowDeleteConfirm(false)

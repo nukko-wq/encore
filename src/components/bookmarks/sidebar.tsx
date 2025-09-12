@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useTags, type TagRow } from '@/hooks/use-tags'
+import { type TagRow, useTags } from '@/hooks/use-tags'
 
 interface BookmarksSidebarProps {
   selectedTagId: string | null
@@ -89,7 +89,7 @@ export default function BookmarksSidebar({
                   <button
                     key={tag.id}
                     onClick={() => handleTagClick(tag.id)}
-                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                    className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors hover:cursor-pointer ${
                       isSelected
                         ? 'bg-blue-100 text-blue-700 font-medium'
                         : 'text-gray-700 hover:bg-gray-100'
@@ -163,7 +163,7 @@ export default function BookmarksSidebar({
             {/* 全て表示オプション */}
             <button
               onClick={handleClearFilter}
-              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors hover:cursor-pointer ${
                 selectedTagId === null
                   ? 'bg-blue-100 text-blue-700 font-medium'
                   : 'text-gray-700 hover:bg-gray-100'
@@ -196,7 +196,7 @@ export default function BookmarksSidebar({
                     <button
                       key={tag.id}
                       onClick={() => handleTagClick(tag.id)}
-                      className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+                      className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors hover:cursor-pointer ${
                         isSelected
                           ? 'bg-blue-100 text-blue-700 font-medium'
                           : 'text-gray-700 hover:bg-gray-100'
@@ -223,7 +223,6 @@ export default function BookmarksSidebar({
           </div>
         )}
       </div>
-
     </div>
   )
 }

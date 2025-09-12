@@ -12,16 +12,16 @@ export function useBookmarks(filters?: BookmarkFilters) {
   // クライアントサイドフィルタリング
   const bookmarks = useMemo(() => {
     if (!allBookmarks) return []
-    
-    return allBookmarks.filter(bookmark => {
+
+    return allBookmarks.filter((bookmark) => {
       // タグフィルタリング
       if (filters?.tags) {
         const hasTag = bookmark.bookmark_tags?.some(
-          tagRelation => tagRelation.tag_id === filters.tags
+          (tagRelation) => tagRelation.tag_id === filters.tags,
         )
         if (!hasTag) return false
       }
-      
+
       // ステータスフィルタリング
       if (filters?.status) {
         if (Array.isArray(filters.status)) {
@@ -30,27 +30,29 @@ export function useBookmarks(filters?: BookmarkFilters) {
           if (bookmark.status !== filters.status) return false
         }
       }
-      
+
       // お気に入りフィルタリング
       if (filters?.is_favorite !== undefined) {
         if (bookmark.is_favorite !== filters.is_favorite) return false
       }
-      
+
       // ピン留めフィルタリング
       if (filters?.is_pinned !== undefined) {
         if (bookmark.is_pinned !== filters.is_pinned) return false
       }
-      
+
       // 検索フィルタリング
       if (filters?.search) {
         const searchTerm = filters.search.toLowerCase()
         const titleMatch = bookmark.title?.toLowerCase().includes(searchTerm)
-        const descriptionMatch = bookmark.description?.toLowerCase().includes(searchTerm)
+        const descriptionMatch = bookmark.description
+          ?.toLowerCase()
+          .includes(searchTerm)
         const memoMatch = bookmark.memo?.toLowerCase().includes(searchTerm)
-        
+
         if (!titleMatch && !descriptionMatch && !memoMatch) return false
       }
-      
+
       return true
     })
   }, [allBookmarks, filters])
@@ -93,8 +95,9 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
     let reconnectTimeoutId: NodeJS.Timeout | null = null
     let reconnectAttempts = 0
-    const maxReconnectAttempts = 5
+    const maxReconnectAttempts = 3
     let isUnmounted = false
+    let currentChannel: any = null // 現在のチャンネル参照を保持
 
     const setupRealtime = (): (() => void) => {
       console.log(
@@ -103,8 +106,16 @@ export function useBookmarks(filters?: BookmarkFilters) {
       const channelName = `bookmarks-changes-${user.id}`
       console.log('📻 Creating channel:', channelName)
 
-      const channel = supabase
-        .channel(channelName)
+      // 既存のチャンネルがあればクリーンアップ
+      if (currentChannel) {
+        console.log('🧹 Cleaning up previous channel before setup')
+        currentChannel.unsubscribe()
+      }
+
+      const channel = supabase.channel(channelName)
+
+      // 現在のチャンネル参照を更新
+      currentChannel = channel
         .on(
           'postgres_changes',
           {
@@ -454,56 +465,48 @@ export function useBookmarks(filters?: BookmarkFilters) {
             reconnectAttempts = 0
             setError(null) // 接続成功時はエラーをクリア
           } else if (status === 'CHANNEL_ERROR') {
+            // エラーメッセージの詳細を解析してフィルタリング
             const errorMessage = err
               ? typeof err === 'string'
                 ? err
-                : JSON.stringify(err)
+                : typeof err === 'object'
+                  ? JSON.stringify(err)
+                  : String(err)
               : 'Unknown error'
-            console.error('❌ Bookmark realtime channel error:', errorMessage)
-            console.error('📛 Error details:', {
-              error: err,
-              errorType: typeof err,
-              channelName,
-              reconnectAttempts,
-              maxAttempts: maxReconnectAttempts,
-            })
 
-            // 再接続を試行
-            if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
-              const retryDelay = Math.min(
-                1000 * Math.pow(2, reconnectAttempts),
-                30000,
-              ) // 指数バックオフ（最大30秒）
-              console.log(
-                `🔄 Scheduling reconnection in ${retryDelay}ms (attempt ${reconnectAttempts + 1}/${maxReconnectAttempts})`,
-              )
-
-              reconnectTimeoutId = setTimeout(() => {
-                if (!isUnmounted) {
-                  reconnectAttempts++
-                  console.log('🔄 Attempting to reconnect...')
-                  channel.unsubscribe()
-                  setupRealtime()
-                }
-              }, retryDelay)
+            // 一般的でノイズとなる"Unknown error"は警告レベルでログ
+            if (errorMessage === 'Unknown error') {
+              console.debug('🔕 Realtime channel error (benign):', errorMessage)
             } else {
-              setError(
-                'リアルタイム接続でエラーが発生しました。ページを再読み込みしてください。',
+              console.warn(
+                '⚠️ Realtime channel error (non-critical):',
+                errorMessage,
               )
             }
-          } else if (status === 'TIMED_OUT') {
-            console.error('⏰ Bookmark realtime connection timed out')
 
-            // タイムアウト時も再接続を試行
+            // CHANNEL_ERRORでは再接続しない（無限ループを防ぐため）
+            // クライアントサイドフィルタリングがあるため基本機能は動作する
+          } else if (status === 'TIMED_OUT') {
+            console.warn('⏰ Bookmark realtime connection timed out')
+
+            // タイムアウト時の再接続を試行
             if (reconnectAttempts < maxReconnectAttempts && !isUnmounted) {
               reconnectAttempts++
               console.log(
                 `🔄 Reconnecting after timeout (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,
               )
-              setupRealtime()
+
+              // 現在のチャンネルをクリーンアップしてから再接続
+              const retryDelay = Math.min(1000 * 2 ** reconnectAttempts, 10000)
+              reconnectTimeoutId = setTimeout(() => {
+                if (!isUnmounted) {
+                  // setupRealtime内でクリーンアップされるため、ここでは不要
+                  setupRealtime()
+                }
+              }, retryDelay)
             } else {
-              setError(
-                'リアルタイム接続がタイムアウトしました。ページを再読み込みしてください。',
+              console.warn(
+                '⚠️ Realtime connection failed after max attempts, continuing without realtime updates',
               )
             }
           } else if (status === 'CLOSED') {
@@ -518,15 +521,17 @@ export function useBookmarks(filters?: BookmarkFilters) {
               console.log(
                 `🔄 Reconnecting after unexpected closure (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,
               )
-              const retryDelay = Math.min(
-                1000 * Math.pow(2, reconnectAttempts),
-                10000,
-              )
+              const retryDelay = Math.min(1000 * 2 ** reconnectAttempts, 10000)
               reconnectTimeoutId = setTimeout(() => {
                 if (!isUnmounted) {
+                  // setupRealtime内でクリーンアップされるため、ここでは不要
                   setupRealtime()
                 }
               }, retryDelay)
+            } else {
+              console.warn(
+                '⚠️ Realtime connection closed after max attempts, continuing without realtime updates',
+              )
             }
           } else if (status === 'CONNECTING') {
             console.log(
@@ -542,18 +547,22 @@ export function useBookmarks(filters?: BookmarkFilters) {
             )
           }
 
-          if (err) {
-            console.error('📛 Bookmark realtime error details:', {
-              error: err,
-              errorType: typeof err,
-              errorMessage: err
-                ? typeof err === 'string'
-                  ? err
-                  : err.toString()
-                : 'undefined',
-              status,
-              channelName,
-            })
+          // エラーの詳細ログは重要な場合のみ出力
+          if (err && status !== 'CHANNEL_ERROR') {
+            const errorMessage = err
+              ? typeof err === 'string'
+                ? err
+                : String(err)
+              : 'undefined'
+
+            // CHANNEL_ERROR以外の重要なエラーのみログ出力
+            if (errorMessage !== 'Unknown error') {
+              console.error('📛 Realtime error details:', {
+                error: errorMessage,
+                status,
+                channelName,
+              })
+            }
           }
         })
 
@@ -562,6 +571,9 @@ export function useBookmarks(filters?: BookmarkFilters) {
           '🔌 Unsubscribing from bookmark realtime channel:',
           channelName,
         )
+        if (currentChannel === channel) {
+          currentChannel = null
+        }
         channel.unsubscribe()
       }
     }
@@ -582,6 +594,12 @@ export function useBookmarks(filters?: BookmarkFilters) {
 
       // チャンネルのクリーンアップ
       initialCleanup()
+
+      // 現在のチャンネル参照もクリア
+      if (currentChannel) {
+        currentChannel.unsubscribe()
+        currentChannel = null
+      }
     }
   }, [user]) // userが変わったときに再設定
 
@@ -879,7 +897,9 @@ export function useBookmarks(filters?: BookmarkFilters) {
           console.warn(
             '⚠️ Realtime DELETE event not received after 5 seconds, forcing local deletion',
           )
-          setAllBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+          setAllBookmarks((prev) =>
+            prev.filter((bookmark) => bookmark.id !== id),
+          )
         }
       }, 5000)
     } catch (err) {
